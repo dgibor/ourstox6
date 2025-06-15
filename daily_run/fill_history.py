@@ -66,8 +66,8 @@ def fetch_finnhub_history(ticker, start_date, end_date):
     params = {
         'symbol': ticker,
         'resolution': 'D',
-        'from': int(start_date.strftime('%s')),
-        'to': int(end_date.strftime('%s')),
+        'from': int(start_date.timestamp()),
+        'to': int(end_date.timestamp()),
         'token': FINNHUB_API_KEY
     }
     try:
