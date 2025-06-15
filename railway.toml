@@ -3,6 +3,9 @@ builder = "nixpacks"
 buildCommand = "pip install -r requirements.txt"
 pythonVersion = "3.11"
 
+[deploy]
+startCommand = "echo 'No persistent service, cron only.'"
+
 [cron]
-schedule = "30 20 * * 1-5"  # Run at 4:30 PM ET (8:30 PM UTC) on weekdays
+schedule = "30 20 * * 1-5"
 command = "python daily_run/daily_run.py"
