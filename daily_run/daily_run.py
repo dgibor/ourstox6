@@ -74,12 +74,12 @@ def check_market_hours():
         return False
     return True
 
-def main():
+def main(test_mode=False):
     start_time = datetime.now()
     logging.info("Starting daily run process")
     
-    # Check if it's a valid time to run
-    if not check_market_hours():
+    # Check if it's a valid time to run (skip if in test mode)
+    if not test_mode and not check_market_hours():
         logging.info("Exiting - not a valid time to run")
         sys.exit(0)
     
@@ -118,4 +118,6 @@ def main():
     sys.exit(0)
 
 if __name__ == "__main__":
-    main() 
+    # Check if test mode is enabled
+    test_mode = "--test" in sys.argv
+    main(test_mode=test_mode) 
