@@ -32,6 +32,7 @@ DB_CONFIG = {
     'user': os.getenv('DB_USER'),
     'password': os.getenv('DB_PASSWORD')
 }
+print("DB_CONFIG:", DB_CONFIG)
 
 # API configurations
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
