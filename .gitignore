@@ -1,0 +1,109 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Installer logs
+debug.log
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# mypy
+.mypy_cache/
+.dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# VS Code
+.vscode/
+
+# Logs and data
+*.log
+logs/
+daily_run/logs/
+*.sqlite3
+*.db
+*.csv
+*.tsv
+*.xls
+*.xlsx
+*.parquet
+*.h5
+*.hdf5
+*.zip
+*.gz
+*.tar
+*.tar.gz
+*.bak
+*.tmp
+
+# Environment variables
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Ignore Railway/Cloud/IDE config
+.railway/
+.idea/
+
+# Ignore old migration and utility scripts
+utility_functions/*.log
+utility_functions/*.pyc
+
+# Allow only important source files
+!daily_run/*.py
+!utility_functions/*.sql
+!*.md
+!requirements.txt
+!pyproject.toml
+!setup.py
+!README.md
+
+# Add pre_filled_stocks/logos directory to .gitignore
+pre_filled_stocks/logos/ 
