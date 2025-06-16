@@ -7,9 +7,12 @@ runtime = "V2"
 numReplicas = 1
 startCommand = "echo 'No persistent service, cron only.'"
 sleepApplication = false
-multiRegionConfig = {"europe-west4-drams3a":{"numReplicas":1}}
 restartPolicyType = "NEVER"
+
+[[deploy.multiRegionConfig]]
+region = "europe-west4-drams3a"
+numReplicas = 1
 
 [cron]
 schedule = "5 22 * * MON-FRI"
-command = "python daily_run/daily_run.py"
+command = "python daily_run.py"
