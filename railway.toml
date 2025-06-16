@@ -1,10 +1,14 @@
 [build]
-builder = "nixpacks"
+builder = "NIXPACKS"
 buildCommand = "pip install -r requirements.txt"
-pythonVersion = "3.11"
 
 [deploy]
-startCommand = "echo 'No persistent service, uses cron only.'"
+runtime = "V2"
+numReplicas = 1
+startCommand = "echo 'No persistent service, cron only.'"
+sleepApplication = false
+multiRegionConfig = {"europe-west4-drams3a":{"numReplicas":1}}
+restartPolicyType = "NEVER"
 
 [cron]
 schedule = "5 22 * * MON-FRI"
