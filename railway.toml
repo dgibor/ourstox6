@@ -4,7 +4,7 @@ buildCommand = "pip install -r requirements.txt"
 pythonVersion = "3.11"
 
 [deploy]
-startCommand = "echo 'No persistent service, cron only.'"
+startCommand = "echo 'No persistent service, uses cron only.'"
 
 [cron]
 schedule = "5 22 * * MON-FRI"
