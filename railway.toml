@@ -8,5 +8,4 @@ numReplicas = 1
 cronSchedule = "5 22 * * MON-FRI"
 startCommand = "python daily_run/daily_run.py"
 sleepApplication = false
-multiRegionConfig = {"europe-west4-drams3a":{"numReplicas":1}}
 restartPolicyType = "NEVER"
