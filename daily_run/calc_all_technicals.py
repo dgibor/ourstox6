@@ -2,6 +2,16 @@ import os
 import psycopg2
 import subprocess
 from dotenv import load_dotenv
+import requests
+import traceback
+
+PING_URL = "https://hc-ping.com/9a33c6a4-9478-4b2f-90e9-65f05bfd6d7f"
+
+def send_healthcheck_report(success, summary):
+    if success:
+        requests.post(PING_URL, data=summary.encode("utf-8"))
+    else:
+        requests.post(PING_URL + "/fail", data=summary.encode("utf-8"))
 
 load_dotenv()
 
@@ -28,36 +38,36 @@ def get_all_tickers(table, ticker_col):
     conn.close()
     return tickers
 
-def run_calc_technicals(table, ticker_col, ticker):
-    cmd = [
-        'python', '-m', 'daily_run.calc_technicals',
-        '--table', table,
-        '--ticker_col', ticker_col,
-        '--ticker', ticker
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    output = result.stdout.strip() + '\n' + result.stderr.strip()
-    updated = False
-    skipped = False
-    if 'Successfully calculated and validated indicators' in output:
-        updated = True
-    elif 'Not enough data' in output:
-        skipped = True
-    print(f"{table} | {ticker}: {output}")
-    return updated, skipped
+def main():
+    summary_lines = []
+    try:
+        for entry in tables:
+            table = entry['table']
+            ticker_col = entry['ticker_col']
+            tickers = get_all_tickers(table, ticker_col)[:3]  # Only process first 3 tickers for testing
+            updated = 0
+            skipped = 0
+            for ticker in tickers:
+                result = subprocess.run([
+                    "python", "daily_run/calc_technicals.py",
+                    "--table", table,
+                    "--ticker_col", ticker_col,
+                    "--ticker", str(ticker)
+                ], capture_output=True, text=True)
+                if "Not enough data" in result.stdout or "No price data found" in result.stdout:
+                    skipped += 1
+                elif result.returncode == 0:
+                    updated += 1
+                else:
+                    skipped += 1
+            summary_lines.append(f"{table}: {updated} updated, {skipped} skipped (total: {len(tickers)})")
+        summary = "✅ Daily run complete:\n" + "\n".join(summary_lines)
+        send_healthcheck_report(True, summary)
+    except Exception as e:
+        tb = traceback.format_exc()
+        summary = f"❌ Daily run failed: {e}\n\nTraceback:\n{tb}"
+        send_healthcheck_report(False, summary)
+        raise
 
 if __name__ == "__main__":
-    for entry in tables:
-        table = entry['table']
-        ticker_col = entry['ticker_col']
-        print(f"Processing table: {table}")
-        tickers = get_all_tickers(table, ticker_col)
-        updated_count = 0
-        skipped_count = 0
-        for ticker in tickers:
-            updated, skipped = run_calc_technicals(table, ticker_col, ticker)
-            if updated:
-                updated_count += 1
-            elif skipped:
-                skipped_count += 1
-        print(f"SUMMARY for {table}: Updated: {updated_count}, Skipped (not enough data): {skipped_count}, Total: {len(tickers)}\n") 
+    main() 

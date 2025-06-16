@@ -95,7 +95,15 @@ def main(test_mode=False):
     ):
         logging.error("Failed to get latest prices. Stopping process.")
         sys.exit(1)
-    
+
+    # Step 1b: Get sector prices
+    if not run_command(
+        "python daily_run/get_sector_prices.py",
+        "Fetching sector prices"
+    ):
+        logging.error("Failed to get sector prices. Stopping process.")
+        sys.exit(1)
+
     # Step 2: Fill history for any missing data
     if not run_command(
         "python daily_run/fill_history.py",
@@ -103,7 +111,31 @@ def main(test_mode=False):
     ):
         logging.error("Failed to fill historical data. Stopping process.")
         sys.exit(1)
-    
+
+    # Step 2b: Fill sector history
+    if not run_command(
+        "python daily_run/fill_history_sector.py",
+        "Filling sector historical data"
+    ):
+        logging.error("Failed to fill sector historical data. Stopping process.")
+        sys.exit(1)
+
+    # Step 2c: Get market prices
+    if not run_command(
+        "python daily_run/get_market_prices.py",
+        "Fetching market prices"
+    ):
+        logging.error("Failed to get market prices. Stopping process.")
+        sys.exit(1)
+
+    # Step 2d: Fill market history
+    if not run_command(
+        "python daily_run/fill_history_market.py",
+        "Filling market historical data"
+    ):
+        logging.error("Failed to fill market historical data. Stopping process.")
+        sys.exit(1)
+
     # Step 3: Calculate technicals for all tables
     if not run_command(
         "python daily_run/calc_all_technicals.py",
