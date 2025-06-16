@@ -12,4 +12,4 @@ restartPolicyType = "NEVER"
 
 [cron]
 schedule = "5 22 * * MON-FRI"
-command = "python daily_run\daily_run.py"
+command = "python daily_run/daily_run.py"
