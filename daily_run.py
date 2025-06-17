@@ -3,8 +3,10 @@ import logging
 import subprocess
 import sys
 from datetime import datetime
+import pytz
 from dotenv import load_dotenv
 import psycopg2
+from daily_run.check_market_schedule import should_run_daily_process
 
 # Load environment variables
 load_dotenv()
@@ -61,66 +63,30 @@ def run_command(command, description):
         logging.error(f"Unexpected error in {description}: {e}")
         return False
 
-def check_market_hours():
-    """Check if it's a valid time to run (after market close)"""
-    now = datetime.now()
-    # Check if it's a weekday
-    if now.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
-        logging.info("Skipping run - weekend")
-        return False
-    # Check if it's after market close (4:00 PM ET = 8:00 PM UTC)
-    if now.hour < 20:
-        logging.info("Skipping run - before market close")
-        return False
-    return True
-
 def main(test_mode=False):
     start_time = datetime.now()
     logging.info("Starting daily run process")
     
-    # Check if it's a valid time to run (skip if in test mode)
-    if not test_mode and not check_market_hours():
-        logging.info("Exiting - not a valid time to run")
-        sys.exit(0)
+    # Check: Was the market open today? (Skip if in test mode)
+    if not test_mode:
+        logging.info("Checking if market was open today...")
+        should_run, reason = should_run_daily_process()
+        
+        if not should_run:
+            logging.info(f"Exiting daily run - {reason}")
+            logging.info("Daily run process completed (skipped due to market closure)")
+            sys.exit(0)
+        else:
+            logging.info(f"Market check passed - {reason}")
+    else:
+        logging.info("Test mode enabled - skipping market schedule check")
     
     # Verify database connection
     if not check_database_connection():
         logging.error("Database connection failed. Stopping process.")
         sys.exit(1)
     
-    # Step 1: Get latest prices
-    if not run_command(
-        "python daily_run/get_prices.py",
-        "Fetching latest prices"
-    ):
-        logging.error("Failed to get latest prices. Stopping process.")
-        sys.exit(1)
-
-    # Step 1b: Get sector prices
-    if not run_command(
-        "python daily_run/get_sector_prices.py",
-        "Fetching sector prices"
-    ):
-        logging.error("Failed to get sector prices. Stopping process.")
-        sys.exit(1)
-
-    # Step 2: Fill history for any missing data
-    if not run_command(
-        "python daily_run/fill_history.py",
-        "Filling historical data"
-    ):
-        logging.error("Failed to fill historical data. Stopping process.")
-        sys.exit(1)
-
-    # Step 2b: Fill sector history
-    if not run_command(
-        "python daily_run/fill_history_sector.py",
-        "Filling sector historical data"
-    ):
-        logging.error("Failed to fill sector historical data. Stopping process.")
-        sys.exit(1)
-
-    # Step 2c: Get market prices
+    # Step 1: Get market prices (indices first)
     if not run_command(
         "python daily_run/get_market_prices.py",
         "Fetching market prices"
@@ -128,7 +94,23 @@ def main(test_mode=False):
         logging.error("Failed to get market prices. Stopping process.")
         sys.exit(1)
 
-    # Step 2d: Fill market history
+    # Step 2: Get sector prices (ETFs second)
+    if not run_command(
+        "python daily_run/get_sector_prices.py",
+        "Fetching sector prices"
+    ):
+        logging.error("Failed to get sector prices. Stopping process.")
+        sys.exit(1)
+
+    # Step 3: Get stock prices (individual stocks third)
+    if not run_command(
+        "python daily_run/get_prices.py",
+        "Fetching stock prices"
+    ):
+        logging.error("Failed to get stock prices. Stopping process.")
+        sys.exit(1)
+
+    # Step 4: Fill market history
     if not run_command(
         "python daily_run/fill_history_market.py",
         "Filling market historical data"
@@ -136,17 +118,41 @@ def main(test_mode=False):
         logging.error("Failed to fill market historical data. Stopping process.")
         sys.exit(1)
 
-    # Step 3: Calculate technicals for all tables
+    # Step 5: Fill sector history
+    if not run_command(
+        "python daily_run/fill_history_sector.py",
+        "Filling sector historical data"
+    ):
+        logging.error("Failed to fill sector historical data. Stopping process.")
+        sys.exit(1)
+
+    # Step 6: Fill stock history
+    if not run_command(
+        "python daily_run/fill_history.py",
+        "Filling stock historical data"
+    ):
+        logging.error("Failed to fill stock historical data. Stopping process.")
+        sys.exit(1)
+
+    # Step 7: Calculate technicals for all tables
     if not run_command(
         "python daily_run/calc_all_technicals.py",
         "Calculating technical indicators"
     ):
         logging.error("Failed to calculate technical indicators.")
         sys.exit(1)
+
+    # Step 8: Remove delisted stocks (final cleanup)
+    if not run_command(
+        "python daily_run/remove_delisted.py",
+        "Removing delisted stocks from database"
+    ):
+        logging.warning("Failed to remove delisted stocks (non-critical, continuing)")
+        # Don't exit on this failure as it's not critical to the main process
     
     end_time = datetime.now()
     duration = end_time - start_time
-    logging.info(f"Daily run completed in {duration}")
+    logging.info(f"Daily run completed successfully in {duration}")
     sys.exit(0)
 
 if __name__ == "__main__":

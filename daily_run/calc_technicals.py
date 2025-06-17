@@ -165,16 +165,6 @@ def validate_calculations(cur, ticker: str, table: str, ticker_col: str) -> bool
 
 def print_latest_indicators():
     import psycopg2
-    from dotenv import load_dotenv
-    import os
-    load_dotenv()
-    DB_CONFIG = {
-        'host': os.getenv('DB_HOST'),
-        'port': os.getenv('DB_PORT'),
-        'dbname': os.getenv('DB_NAME'),
-        'user': os.getenv('DB_USER'),
-        'password': os.getenv('DB_PASSWORD')
-    }
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()

@@ -326,12 +326,18 @@ def fetch_yahoo_history(tickers, start_date, end_date):
         return None
 
 def fetch_finnhub_history(ticker, start_date, end_date):
+    # Ensure datetime objects for timestamp conversion
+    if isinstance(start_date, date) and not isinstance(start_date, datetime):
+        start_date = datetime.combine(start_date, datetime.min.time())
+    if isinstance(end_date, date) and not isinstance(end_date, datetime):
+        end_date = datetime.combine(end_date, datetime.min.time())
+    
     url = f"https://finnhub.io/api/v1/stock/candle"
     params = {
         'symbol': ticker,
         'resolution': 'D',
-        'from': int(start_date.strftime('%s')),
-        'to': int(end_date.strftime('%s')),
+        'from': int(start_date.timestamp()),
+        'to': int(end_date.timestamp()),
         'token': FINNHUB_API_KEY
     }
     try:

@@ -6,4 +6,6 @@ requests
 python-dotenv
 ratelimit
 fastapi
-uvicorn[standard] 
+uvicorn[standard]
+pytz
+pandas-market-calendars 

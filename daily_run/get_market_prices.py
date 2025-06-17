@@ -98,6 +98,10 @@ class MarketPriceCollector:
                     for ticker in batch:
                         try:
                             tdata = data.xs(ticker, axis=1, level=1, drop_level=False)
+                            if tdata.empty:
+                                logging.error(f"Skipping {ticker}: Empty data returned")
+                                failed.append(ticker)
+                                continue
                             row = tdata.iloc[-1]
                             if any(pd.isna(row[field].item()) for field in ['Open', 'High', 'Low', 'Close']):
                                 logging.error(f"Skipping {ticker}: NaN price data")
@@ -115,6 +119,10 @@ class MarketPriceCollector:
                             failed.append(ticker)
                 else:
                     try:
+                        if data.empty:
+                            logging.error(f"Skipping {batch[0]}: Empty data returned")
+                            failed.append(batch[0])
+                            continue
                         row = data.iloc[-1]
                         ticker = batch[0]
                         if any(pd.isna(row[field].item()) for field in ['Open', 'High', 'Low', 'Close']):
