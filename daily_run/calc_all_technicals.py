@@ -47,25 +47,38 @@ def main():
             tickers = get_all_tickers(table, ticker_col)  # Process all tickers
             updated = 0
             skipped = 0
-            for ticker in tickers:
+            
+            print(f"Processing {len(tickers)} tickers in {table}")
+            
+            for i, ticker in enumerate(tickers, 1):
+                if i % 50 == 0:  # Progress update every 50 tickers
+                    print(f"Progress: {i}/{len(tickers)} tickers processed")
+                
                 result = subprocess.run([
                     "python", "daily_run/calc_technicals.py",
                     "--table", table,
                     "--ticker_col", ticker_col,
                     "--ticker", str(ticker)
                 ], capture_output=True, text=True)
+                
                 if "Not enough data" in result.stdout or "No price data found" in result.stdout:
                     skipped += 1
                 elif result.returncode == 0:
                     updated += 1
                 else:
+                    print(f"Error processing {ticker}: {result.stderr}")
                     skipped += 1
+            
             summary_lines.append(f"{table}: {updated} updated, {skipped} skipped (total: {len(tickers)})")
+            print(f"Completed {table}: {updated} updated, {skipped} skipped")
+        
         summary = "✅ Daily run complete:\n" + "\n".join(summary_lines)
+        print(summary)
         send_healthcheck_report(True, summary)
     except Exception as e:
         tb = traceback.format_exc()
         summary = f"❌ Daily run failed: {e}\n\nTraceback:\n{tb}"
+        print(summary)
         send_healthcheck_report(False, summary)
         raise
 
