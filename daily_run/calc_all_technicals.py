@@ -44,7 +44,7 @@ def main():
         for entry in tables:
             table = entry['table']
             ticker_col = entry['ticker_col']
-            tickers = get_all_tickers(table, ticker_col)[:3]  # Only process first 3 tickers for testing
+            tickers = get_all_tickers(table, ticker_col)  # Process all tickers
             updated = 0
             skipped = 0
             for ticker in tickers:

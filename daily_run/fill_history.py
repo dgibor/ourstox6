@@ -7,6 +7,7 @@ import time
 import logging
 from datetime import date, timedelta, datetime
 from dotenv import load_dotenv
+from ratelimit import limits, sleep_and_retry
 
 # Load environment variables
 load_dotenv()
@@ -21,8 +22,10 @@ DB_CONFIG = {
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
 
-BATCH_SIZE = 50
+BATCH_SIZE = 500
 MIN_HISTORY_DAYS = 100
+FINNHUB_CALLS_PER_MIN = 60
+ALPHA_VANTAGE_CALLS_PER_MIN = 5
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,78 +56,226 @@ def get_ticker_gaps(cur):
             ticker_gaps[ticker] = {'days_available': 0, 'min_date': None, 'max_date': None}
     return ticker_gaps
 
+def is_rate_limit_error(error_msg):
+    """Check if error is due to rate limiting."""
+    rate_limit_indicators = [
+        "too many requests",
+        "rate limit",
+        "429",
+        "try again later",
+        "exceeded",
+        "quota",
+        "throttle"
+    ]
+    error_lower = str(error_msg).lower()
+    return any(indicator in error_lower for indicator in rate_limit_indicators)
+
+def is_delisted_error(error_msg):
+    """Check if error indicates stock is delisted."""
+    delisted_indicators = [
+        "delisted",
+        "no data found",
+        "not found",
+        "invalid symbol",
+        "no price data",
+        "ticker not found",
+        "404"
+    ]
+    error_lower = str(error_msg).lower()
+    return any(indicator in error_lower for indicator in delisted_indicators)
+
+def log_delisted_stock(symbol):
+    """Log delisted stock to separate file."""
+    log_file = os.path.join(os.path.dirname(__file__), '..', 'logs', 'delisted.log')
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
+    
+    with open(log_file, 'a') as f:
+        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - DELISTED: {symbol}\n")
+    
+    logging.warning(f"Stock {symbol} appears to be delisted - logged to delisted.log")
+
+def fetch_yahoo_history_single(ticker, start_date, end_date):
+    """Fetch historical data for a single ticker using Yahoo Finance."""
+    try:
+        stock = yf.Ticker(ticker)
+        data = stock.history(start=start_date, end=end_date)
+        
+        if data.empty:
+            logging.warning(f"Yahoo Finance returned empty data for {ticker}")
+            return None, "empty_data"
+        
+        logging.info(f"Yahoo: Fetched {len(data)} days of data for {ticker}")
+        return data, "success"
+        
+    except Exception as e:
+        error_msg = str(e)
+        if is_rate_limit_error(error_msg):
+            logging.warning(f"Yahoo rate limit for {ticker}: {error_msg}")
+            return None, "rate_limit"
+        elif is_delisted_error(error_msg):
+            return None, "delisted"
+        else:
+            logging.error(f"Yahoo error for {ticker}: {error_msg}")
+            return None, "error"
+
 def fetch_yahoo_history(tickers, start_date, end_date):
+    """Try to fetch batch data, fall back to individual if rate limited."""
     try:
         data = yf.download(tickers, start=start_date, end=end_date, threads=True, group_by='ticker', auto_adjust=False)
-        return data
+        if data is None or data.empty:
+            return None, "empty_data"
+        return data, "success"
     except Exception as e:
-        logging.error(f"Yahoo download error: {e}")
-        return None
+        error_msg = str(e)
+        if is_rate_limit_error(error_msg):
+            logging.warning(f"Yahoo batch rate limited: {error_msg}")
+            return None, "rate_limit"
+        else:
+            logging.error(f"Yahoo batch download error: {e}")
+            return None, "error"
 
+@sleep_and_retry
+@limits(calls=FINNHUB_CALLS_PER_MIN, period=60)
 def fetch_finnhub_history(ticker, start_date, end_date):
-    # Ensure datetime objects for timestamp conversion
-    if isinstance(start_date, date) and not isinstance(start_date, datetime):
-        start_date = datetime.combine(start_date, datetime.min.time())
-    if isinstance(end_date, date) and not isinstance(end_date, datetime):
-        end_date = datetime.combine(end_date, datetime.min.time())
-    
-    url = f"https://finnhub.io/api/v1/stock/candle"
-    params = {
-        'symbol': ticker,
-        'resolution': 'D',
-        'from': int(start_date.timestamp()),
-        'to': int(end_date.timestamp()),
-        'token': FINNHUB_API_KEY
-    }
+    """Fetch historical data using Finnhub API."""
     try:
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('s') == 'ok':
-                df = pd.DataFrame({
-                    'date': pd.to_datetime(data['t'], unit='s'),
-                    'Open': data['o'],
-                    'High': data['h'],
-                    'Low': data['l'],
-                    'Close': data['c'],
-                    'Volume': data['v']
-                })
-                df.set_index('date', inplace=True)
-                return df
-        return None
+        # Ensure datetime objects for timestamp conversion
+        if isinstance(start_date, date) and not isinstance(start_date, datetime):
+            start_date = datetime.combine(start_date, datetime.min.time())
+        if isinstance(end_date, date) and not isinstance(end_date, datetime):
+            end_date = datetime.combine(end_date, datetime.min.time())
+        
+        url = f"https://finnhub.io/api/v1/stock/candle"
+        params = {
+            'symbol': ticker,
+            'resolution': 'D',
+            'from': int(start_date.timestamp()),
+            'to': int(end_date.timestamp()),
+            'token': FINNHUB_API_KEY
+        }
+        
+        response = requests.get(url, params=params, timeout=30)
+        data = response.json()
+        
+        if response.status_code == 429:
+            return None, "rate_limit"
+        elif data.get('s') == 'no_data':
+            return None, "delisted"
+        elif data.get('s') != 'ok':
+            return None, "error"
+        
+        df = pd.DataFrame({
+            'date': pd.to_datetime(data['t'], unit='s'),
+            'Open': data['o'],
+            'High': data['h'],
+            'Low': data['l'],
+            'Close': data['c'],
+            'Volume': data['v']
+        })
+        df.set_index('date', inplace=True)
+        
+        logging.info(f"Finnhub: Fetched {len(df)} days of data for {ticker}")
+        return df, "success"
+        
     except Exception as e:
-        logging.error(f"Finnhub error for {ticker}: {e}")
-        return None
+        error_msg = str(e)
+        if is_rate_limit_error(error_msg):
+            return None, "rate_limit"
+        else:
+            logging.error(f"Finnhub error for {ticker}: {error_msg}")
+            return None, "error"
 
-def fetch_alpha_vantage_history(ticker):
-    url = f"https://www.alphavantage.co/query"
-    params = {
-        'function': 'TIME_SERIES_DAILY_ADJUSTED',
-        'symbol': ticker,
-        'apikey': ALPHA_VANTAGE_API_KEY,
-        'outputsize': 'compact'
-    }
+@sleep_and_retry
+@limits(calls=ALPHA_VANTAGE_CALLS_PER_MIN, period=60)
+def fetch_alpha_vantage_history(ticker, years=5):
+    """Fetch historical data using Alpha Vantage API."""
     try:
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            data = response.json()
-            ts = data.get('Time Series (Daily)', {})
-            if ts:
-                df = pd.DataFrame.from_dict(ts, orient='index')
-                df.index = pd.to_datetime(df.index)
-                df = df.rename(columns={
-                    '1. open': 'Open',
-                    '2. high': 'High',
-                    '3. low': 'Low',
-                    '4. close': 'Close',
-                    '6. volume': 'Volume'
-                })
-                df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
-                return df
-        return None
+        url = f"https://www.alphavantage.co/query"
+        params = {
+            'function': 'TIME_SERIES_DAILY',
+            'symbol': ticker,
+            'apikey': ALPHA_VANTAGE_API_KEY,
+            'outputsize': 'compact'  # Changed to compact to get ~100 days
+        }
+        
+        response = requests.get(url, params=params, timeout=30)
+        data = response.json()
+        
+        if 'Error Message' in data:
+            return None, "delisted"
+        elif 'Note' in data and 'API call frequency' in data['Note']:
+            return None, "rate_limit"
+        elif 'Time Series (Daily)' not in data:
+            return None, "error"
+        
+        ts = data['Time Series (Daily)']
+        df = pd.DataFrame.from_dict(ts, orient='index')
+        df.index = pd.to_datetime(df.index)
+        df = df.rename(columns={
+            '1. open': 'Open',
+            '2. high': 'High',
+            '3. low': 'Low',
+            '4. close': 'Close',
+            '5. volume': 'Volume'
+        })
+        df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
+        df = df.sort_index()
+        
+        # Filter to requested time range (last ~120 days to match other scripts)
+        cutoff_date = date.today() - timedelta(days=years*365 if years*365 < 120 else 120)
+        df = df[df.index.date >= cutoff_date]
+        
+        logging.info(f"Alpha Vantage: Fetched {len(df)} days of data for {ticker}")
+        return df, "success"
+        
     except Exception as e:
-        logging.error(f"Alpha Vantage error for {ticker}: {e}")
-        return None
+        error_msg = str(e)
+        if is_rate_limit_error(error_msg):
+            return None, "rate_limit"
+        else:
+            logging.error(f"Alpha Vantage error for {ticker}: {error_msg}")
+            return None, "error"
+
+def fetch_stock_history_with_fallback(ticker, start_date, end_date):
+    """
+    Fetch historical data with API fallback system:
+    Yahoo → Finnhub → Yahoo (1hr later) → Finnhub → Alpha Vantage → DB previous close
+    """
+    # Calculate years from date range for Alpha Vantage
+    days_requested = (end_date - start_date).days
+    years_requested = max(1, days_requested // 365)
+    
+    phases = [
+        ("Yahoo (Phase 1)", lambda: fetch_yahoo_history_single(ticker, start_date, end_date)),
+        ("Finnhub (Phase 2)", lambda: fetch_finnhub_history(ticker, start_date, end_date)),
+        ("Yahoo (Phase 3)", lambda: fetch_yahoo_history_single(ticker, start_date, end_date)),  # 1hr retry
+        ("Finnhub (Phase 4)", lambda: fetch_finnhub_history(ticker, start_date, end_date)),
+        ("Alpha Vantage (Phase 5)", lambda: fetch_alpha_vantage_history(ticker, years_requested))
+    ]
+    
+    for phase_name, fetch_func in phases:
+        try:
+            data, status = fetch_func()
+            
+            if status == "success" and data is not None and not data.empty:
+                return data
+            elif status == "delisted":
+                log_delisted_stock(ticker)
+                return None
+            elif status == "rate_limit":
+                logging.warning(f"{phase_name} rate limited for {ticker}, trying next API")
+                continue
+            else:
+                logging.warning(f"{phase_name} failed for {ticker}, trying next API")
+                continue
+                
+        except Exception as e:
+            logging.error(f"{phase_name} exception for {ticker}: {e}")
+            continue
+    
+    # Phase 6: No data available from any API
+    logging.warning(f"All APIs failed for {ticker}, no historical data available")
+    return None
 
 def insert_history(conn, cur, ticker, hist_df):
     for idx, row in hist_df.iterrows():
@@ -159,46 +310,60 @@ def fill_history():
     tickers = list(ticker_gaps.keys())
     today = date.today()
     start_date = today - timedelta(days=120)
+    
+    # First try batch processing with Yahoo
     for i in range(0, len(tickers), BATCH_SIZE):
         batch = tickers[i:i+BATCH_SIZE]
         logging.info(f"Processing batch {i//BATCH_SIZE+1}: {batch}")
-        data = fetch_yahoo_history(batch, start_date, today)
+        
+        data, status = fetch_yahoo_history(batch, start_date, today)
         failed_tickers = []
-        if data is None:
-            logging.error(f"Yahoo batch failed: {batch}")
-            failed_tickers = batch
-        else:
+        
+        if status == "success" and data is not None:
             for ticker in batch:
                 try:
-                    if isinstance(data, pd.DataFrame) and ticker in data.columns.get_level_values(0):
-                        tdf = data[ticker].dropna(subset=['Open', 'High', 'Low', 'Close'])
+                    # Handle multi-level columns from yfinance batch download
+                    if isinstance(data, pd.DataFrame) and hasattr(data.columns, 'levels'):
+                        if ticker in data.columns.get_level_values(0):
+                            tdf = data[ticker].dropna(subset=['Open', 'High', 'Low', 'Close'])
+                        else:
+                            failed_tickers.append(ticker)
+                            continue
                     elif isinstance(data, pd.DataFrame) and set(['Open', 'High', 'Low', 'Close']).issubset(data.columns):
                         tdf = data.dropna(subset=['Open', 'High', 'Low', 'Close'])
                     else:
-                        logging.error(f"No data for {ticker} in batch")
                         failed_tickers.append(ticker)
                         continue
+                    
                     if tdf.empty:
                         failed_tickers.append(ticker)
                         continue
+                        
                     insert_history(conn, cur, ticker, tdf)
+                    logging.info(f"Batch processing successful for {ticker}")
                 except Exception as e:
-                    logging.error(f"Error processing {ticker}: {e}")
+                    logging.error(f"Error processing {ticker} from batch: {e}")
                     failed_tickers.append(ticker)
-        # Finnhub fallback for failed tickers
+        else:
+            # Entire batch failed
+            logging.warning(f"Yahoo batch failed with status: {status}")
+            failed_tickers = batch
+        
+        # Process failed tickers individually with full fallback system
         for ticker in failed_tickers:
-            time.sleep(1.2)  # Finnhub rate limit
-            tdf = fetch_finnhub_history(ticker, start_date, today)
+            logging.info(f"Processing {ticker} individually with fallback system")
+            tdf = fetch_stock_history_with_fallback(ticker, start_date, today)
             if tdf is not None and not tdf.empty:
                 insert_history(conn, cur, ticker, tdf)
-                continue
-            # Alpha Vantage fallback (very limited quota)
-            tdf = fetch_alpha_vantage_history(ticker)
-            if tdf is not None and not tdf.empty:
-                # Only keep last 100 days
-                tdf = tdf.sort_index().iloc[-100:]
-                insert_history(conn, cur, ticker, tdf)
-        time.sleep(30)  # Conservative delay
+                logging.info(f"Successfully retrieved data for {ticker} via fallback")
+            else:
+                logging.warning(f"Failed to retrieve any data for {ticker}")
+        
+        # Rate limiting pause between batches
+        if i + BATCH_SIZE < len(tickers):
+            logging.info("Pausing between batches...")
+            time.sleep(10)
+    
     cur.close()
     conn.close()
     logging.info("History fill complete.")
