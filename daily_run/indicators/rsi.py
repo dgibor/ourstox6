@@ -16,6 +16,9 @@ def calculate_rsi(prices: pd.Series, window: int = 14) -> pd.Series:
     gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
     
+    # Prevent division by zero when loss is zero
+    loss = loss.replace(0, np.nan)
+    
     rs = gain / loss
     rsi = 100 - (100 / (1 + rs))
     return rsi 
