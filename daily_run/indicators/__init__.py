@@ -8,6 +8,7 @@ This package contains modules for calculating various technical indicators:
 - Bollinger Bands
 - MACD (Moving Average Convergence Divergence)
 - ATR (Average True Range)
+- ADX (Average Directional Index) - with Wilder's smoothing
 - VWAP (Volume Weighted Average Price)
 - Stochastic Oscillator (%K and %D) - with division by zero protection
 - Support/Resistance levels and swing points - with input validation

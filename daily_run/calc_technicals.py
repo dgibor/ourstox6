@@ -20,6 +20,7 @@ from indicators.atr import calculate_atr
 from indicators.vwap import calculate_vwap
 from indicators.stochastic import calculate_stochastic
 from indicators.support_resistance import calculate_support_resistance
+from indicators.adx import calculate_adx
 
 # Load environment variables
 load_dotenv()
@@ -141,6 +142,13 @@ def calculate_indicators(df: pd.DataFrame) -> dict:
         except Exception as e:
             logging.warning(f"Failed to calculate ATR: {e}")
     
+    # ADX (needs 28+ days for meaningful results - 14 for TR/DM + 14 for smoothing)
+    if data_length >= 28:
+        try:
+            indicators['adx_14'] = calculate_adx(df['high'], df['low'], df['close'])
+        except Exception as e:
+            logging.warning(f"Failed to calculate ADX: {e}")
+    
     # VWAP (needs 1+ days)
     if data_length >= 1:
         try:
@@ -196,6 +204,7 @@ def update_database(cur, ticker: str, indicators: dict, table: str, ticker_col: 
         'macd_signal': 'macd_signal',
         'macd_histogram': 'macd_histogram',
         'atr_14': 'atr_14',
+        'adx_14': 'adx_14',
         'vwap': 'vwap',
         'stoch_k': 'stoch_k',
         'stoch_d': 'stoch_d',
@@ -261,7 +270,7 @@ def validate_calculations(cur, ticker: str, table: str, ticker_col: str) -> bool
             rsi_14, cci_20, ema_20, ema_50, ema_100, ema_200,
             bb_upper, bb_middle, bb_lower,
             macd_line, macd_signal, macd_histogram,
-            atr_14, vwap, stoch_k, stoch_d,
+            atr_14, adx_14, vwap, stoch_k, stoch_d,
             resistance_1, resistance_2, resistance_3,
             support_1, support_2, support_3,
             swing_high_5d, swing_low_5d, swing_high_10d, swing_low_10d,
@@ -286,11 +295,11 @@ def print_latest_indicators():
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
-        cur.execute('''SELECT date, rsi_14, cci_20, ema_20, ema_50, ema_100, ema_200, bb_upper, bb_middle, bb_lower, macd_line, macd_signal, macd_histogram, atr_14, vwap, stoch_k, stoch_d, resistance_1, resistance_2, resistance_3, support_1, support_2, support_3, swing_high_5d, swing_low_5d, pivot_point FROM market_data WHERE ticker = %s ORDER BY date DESC LIMIT 1''', ('SPY',))
+        cur.execute('''SELECT date, rsi_14, cci_20, ema_20, ema_50, ema_100, ema_200, bb_upper, bb_middle, bb_lower, macd_line, macd_signal, macd_histogram, atr_14, adx_14, vwap, stoch_k, stoch_d, resistance_1, resistance_2, resistance_3, support_1, support_2, support_3, swing_high_5d, swing_low_5d, pivot_point FROM market_data WHERE ticker = %s ORDER BY date DESC LIMIT 1''', ('SPY',))
         row = cur.fetchone()
         if row:
             print("Latest technical indicators for SPY:")
-            print("date, rsi_14, cci_20, ema_20, ema_50, ema_100, ema_200, bb_upper, bb_middle, bb_lower, macd_line, macd_signal, macd_histogram, atr_14, vwap, stoch_k, stoch_d, resistance_1, resistance_2, resistance_3, support_1, support_2, support_3, swing_high_5d, swing_low_5d, pivot_point")
+            print("date, rsi_14, cci_20, ema_20, ema_50, ema_100, ema_200, bb_upper, bb_middle, bb_lower, macd_line, macd_signal, macd_histogram, atr_14, adx_14, vwap, stoch_k, stoch_d, resistance_1, resistance_2, resistance_3, support_1, support_2, support_3, swing_high_5d, swing_low_5d, pivot_point")
             print(row)
         else:
             print("No row found for SPY.")

@@ -1,0 +1,216 @@
+{
+  "dashboard": {
+    "name": "Value Investing Dashboard",
+    "version": "1.0.0",
+    "theme": {
+      "primary": "#2563EB",
+      "secondary": "#6B7280",
+      "success": "#059669",
+      "warning": "#FCD34D",
+      "danger": "#EF4444",
+      "background": "#FFFFFF",
+      "surface": "#F9FAFB",
+      "border": "#E5E7EB"
+    },
+    "layout": {
+      "container": {
+        "maxWidth": "1280px",
+        "padding": "24px",
+        "gap": "24px"
+      },
+      "grid": {
+        "primary": {
+          "columns": 2,
+          "gap": "24px",
+          "mobileColumns": 1
+        },
+        "secondary": {
+          "columns": 4,
+          "gap": "16px",
+          "tabletColumns": 2,
+          "mobileColumns": 1
+        }
+      }
+    },
+    "components": {
+      "card": {
+        "borderRadius": "12px",
+        "padding": "20px",
+        "shadow": "0 1px 3px 0 rgba(0, 0, 0, 0.1)",
+        "hoverShadow": "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+        "transition": "all 0.2s ease-out"
+      },
+      "signalStrength": {
+        "dotSize": "12px",
+        "dotGap": "6px",
+        "colors": {
+          "5": "#059669",
+          "4": "#34D399",
+          "3": "#FCD34D",
+          "2": "#FB923C",
+          "1": "#EF4444",
+          "empty": "#E5E7EB"
+        }
+      },
+      "scoreGauge": {
+        "size": "180px",
+        "strokeWidth": "12px",
+        "animationDuration": "1s",
+        "ranges": {
+          "excellent": { "min": 80, "max": 100, "color": "#059669" },
+          "good": { "min": 60, "max": 79, "color": "#34D399" },
+          "fair": { "min": 40, "max": 59, "color": "#FCD34D" },
+          "poor": { "min": 20, "max": 39, "color": "#FB923C" },
+          "veryPoor": { "min": 0, "max": 19, "color": "#EF4444" }
+        }
+      },
+      "button": {
+        "primary": {
+          "background": "#2563EB",
+          "color": "#FFFFFF",
+          "padding": "10px 20px",
+          "borderRadius": "8px"
+        },
+        "secondary": {
+          "background": "transparent",
+          "color": "#2563EB",
+          "border": "1px solid #2563EB",
+          "padding": "8px 16px",
+          "borderRadius": "6px"
+        }
+      }
+    },
+    "cards": {
+      "valuation": {
+        "title": "VALUATION MATRIX",
+        "icon": "💎",
+        "primary": true,
+        "metrics": [
+          { "key": "pe_ratio", "label": "P/E Ratio", "format": "number:1" },
+          { "key": "pb_ratio", "label": "P/B Ratio", "format": "number:2" },
+          { "key": "ev_ebitda", "label": "EV/EBITDA", "format": "number:1" },
+          { "key": "peg_ratio", "label": "PEG Ratio", "format": "number:2" },
+          { "key": "graham_number", "label": "Graham Number", "format": "currency" }
+        ]
+      },
+      "quality": {
+        "title": "BUSINESS QUALITY SCORE",
+        "icon": "🏆",
+        "primary": true,
+        "metrics": [
+          { "key": "roe", "label": "ROE", "format": "percentage" },
+          { "key": "roic", "label": "ROIC", "format": "percentage" },
+          { "key": "gross_margin", "label": "Gross Margin", "format": "percentage" },
+          { "key": "fcf_consistency", "label": "FCF Consistency", "format": "score" }
+        ]
+      },
+      "profitability": {
+        "title": "PROFITABILITY TRENDS",
+        "icon": "📈",
+        "metrics": [
+          { "key": "net_margin", "label": "Net Margin", "format": "percentage" },
+          { "key": "operating_margin", "label": "Op Margin", "format": "percentage" },
+          { "key": "ebitda_margin", "label": "EBITDA Margin", "format": "percentage" }
+        ]
+      },
+      "financial_health": {
+        "title": "FINANCIAL HEALTH",
+        "icon": "🏥",
+        "metrics": [
+          { "key": "debt_equity", "label": "D/E Ratio", "format": "number:2" },
+          { "key": "current_ratio", "label": "Current Ratio", "format": "number:2" },
+          { "key": "altman_z", "label": "Altman Z-Score", "format": "number:2" }
+        ]
+      },
+      "growth": {
+        "title": "GROWTH MOMENTUM",
+        "icon": "🚀",
+        "metrics": [
+          { "key": "revenue_cagr_3y", "label": "Revenue CAGR", "format": "percentage" },
+          { "key": "earnings_growth", "label": "Earnings Growth", "format": "percentage" },
+          { "key": "fcf_growth", "label": "FCF Growth", "format": "percentage" }
+        ]
+      },
+      "management": {
+        "title": "MANAGEMENT EFFECTIVENESS",
+        "icon": "👔",
+        "metrics": [
+          { "key": "roa", "label": "ROA", "format": "percentage" },
+          { "key": "asset_turnover", "label": "Asset Turnover", "format": "number:2" },
+          { "key": "insider_ownership", "label": "Insider Own%", "format": "percentage" }
+        ]
+      }
+    },
+    "investorProfiles": {
+      "conservative": {
+        "name": "Conservative Value",
+        "weights": {
+          "financial_health": 0.30,
+          "valuation": 0.25,
+          "quality": 0.20,
+          "profitability": 0.15,
+          "growth": 0.05,
+          "management": 0.05
+        }
+      },
+      "garp": {
+        "name": "GARP",
+        "weights": {
+          "valuation": 0.25,
+          "growth": 0.25,
+          "quality": 0.20,
+          "profitability": 0.15,
+          "financial_health": 0.10,
+          "management": 0.05
+        }
+      },
+      "deep_value": {
+        "name": "Deep Value",
+        "weights": {
+          "valuation": 0.40,
+          "financial_health": 0.25,
+          "quality": 0.15,
+          "profitability": 0.10,
+          "management": 0.05,
+          "growth": 0.05
+        }
+      }
+    },
+    "responsive": {
+      "breakpoints": {
+        "mobile": 640,
+        "tablet": 768,
+        "desktop": 1024,
+        "wide": 1280
+      },
+      "scaling": {
+        "mobile": {
+          "fontSize": "14px",
+          "cardPadding": "16px",
+          "gap": "16px"
+        },
+        "tablet": {
+          "fontSize": "15px",
+          "cardPadding": "18px",
+          "gap": "20px"
+        },
+        "desktop": {
+          "fontSize": "16px",
+          "cardPadding": "20px",
+          "gap": "24px"
+        }
+      }
+    },
+    "animations": {
+      "duration": {
+        "fast": "0.2s",
+        "normal": "0.3s",
+        "slow": "1s"
+      },
+      "easing": {
+        "default": "ease-out",
+        "bounce": "cubic-bezier(0.68, -0.55, 0.265, 1.55)"
+      }
+    }
+  }
+}
