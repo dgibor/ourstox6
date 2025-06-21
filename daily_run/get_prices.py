@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 from typing import List, Dict, Tuple
 import concurrent.futures
 from ratelimit import limits, sleep_and_retry
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utility_functions.api_rate_limiter import APIRateLimiter
 
 # Load environment variables
 load_dotenv()
@@ -64,6 +67,7 @@ class PriceCollector:
         self.cur = None
         self.test_mode = test_mode
         self.setup_database()
+        self.api_limiter = APIRateLimiter()
 
     def setup_database(self):
         """Initialize database connection"""
@@ -197,13 +201,17 @@ class PriceCollector:
         
         return prices_data, failed
 
-    @sleep_and_retry
-    @limits(calls=FINNHUB_CALLS_PER_MIN, period=60)
     def get_finnhub_price(self, ticker: str) -> Dict:
-        """Get price from Finnhub API with rate limiting"""
+        """Get price from Finnhub API with rate limiting and usage tracking"""
+        provider = 'finnhub'
+        endpoint = 'quote'
+        if not self.api_limiter.check_limit(provider, endpoint):
+            logging.warning(f"Finnhub API limit reached, skipping {ticker}")
+            return None
         try:
             url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB_API_KEY}"
             response = requests.get(url)
+            self.api_limiter.record_call(provider, endpoint)
             if response.status_code == 200:
                 return response.json()
             return None
@@ -239,10 +247,16 @@ class PriceCollector:
         return prices_data, failed
 
     def get_alpha_vantage_price(self, ticker: str) -> Dict:
-        """Get price from Alpha Vantage API"""
+        """Get price from Alpha Vantage API with usage tracking"""
+        provider = 'alphavantage'
+        endpoint = 'GLOBAL_QUOTE'
+        if not self.api_limiter.check_limit(provider, endpoint):
+            logging.warning(f"Alpha Vantage API limit reached, skipping {ticker}")
+            return None
         try:
             url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
             response = requests.get(url)
+            self.api_limiter.record_call(provider, endpoint)
             if response.status_code == 200:
                 return response.json()
             return None
@@ -344,6 +358,20 @@ class PriceCollector:
             logging.error(f"Database update error: {e}")
             raise
 
+    def get_api_remaining_quota(self, provider: str, endpoint: str) -> int:
+        """Utility to check remaining quota for a provider/endpoint"""
+        today = datetime.utcnow().date()
+        self.api_limiter.cur.execute(
+            "SELECT calls_made, calls_limit FROM api_usage_tracking WHERE api_provider=%s AND date=%s AND endpoint=%s",
+            (provider, today, endpoint)
+        )
+        row = self.api_limiter.cur.fetchone()
+        if row:
+            calls_made, calls_limit = row
+            return max(0, calls_limit - calls_made)
+        else:
+            return API_LIMITS[provider]['calls_per_day']
+
     def run(self):
         """Main execution function with improved fallback sequence"""
         try:
@@ -423,6 +451,7 @@ class PriceCollector:
         finally:
             if self.conn:
                 self.conn.close()
+            self.api_limiter.close()
 
 if __name__ == "__main__":
     import sys
