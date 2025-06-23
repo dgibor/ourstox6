@@ -151,17 +151,47 @@ class YahooFinanceService:
                 'cash_flow': {}
             }
             
-            # Parse income statement (most recent year)
+            # Parse income statement and calculate TTM
             if not income_stmt.empty:
+                # Get the last 4 quarters for TTM calculation
+                columns = list(income_stmt.columns)
+                if len(columns) >= 4:
+                    ttm_columns = columns[:4]  # Last 4 quarters
+                else:
+                    ttm_columns = columns  # Use all available quarters
+                
+                # Calculate TTM values
+                ttm_revenue = sum(self.safe_get_value(income_stmt, 'Total Revenue', col) or 0 for col in ttm_columns)
+                ttm_gross_profit = sum(self.safe_get_value(income_stmt, 'Gross Profit', col) or 0 for col in ttm_columns)
+                ttm_operating_income = sum(self.safe_get_value(income_stmt, 'Operating Income', col) or 0 for col in ttm_columns)
+                ttm_net_income = sum(self.safe_get_value(income_stmt, 'Net Income', col) or 0 for col in ttm_columns)
+                ttm_ebitda = sum(self.safe_get_value(income_stmt, 'EBITDA', col) or 0 for col in ttm_columns)
+                
+                # Also get annual data for comparison
                 latest_year = income_stmt.columns[0]
                 financial_data['income_statement'] = {
-                    'revenue': self.safe_get_value(income_stmt, 'Total Revenue', latest_year),
-                    'gross_profit': self.safe_get_value(income_stmt, 'Gross Profit', latest_year),
-                    'operating_income': self.safe_get_value(income_stmt, 'Operating Income', latest_year),
-                    'net_income': self.safe_get_value(income_stmt, 'Net Income', latest_year),
-                    'ebitda': self.safe_get_value(income_stmt, 'EBITDA', latest_year),
-                    'fiscal_year': latest_year.year
+                    'revenue': ttm_revenue,  # Use TTM instead of annual
+                    'revenue_annual': self.safe_get_value(income_stmt, 'Total Revenue', latest_year),
+                    'gross_profit': ttm_gross_profit,
+                    'operating_income': ttm_operating_income,
+                    'net_income': ttm_net_income,
+                    'ebitda': ttm_ebitda,
+                    'fiscal_year': latest_year.year,
+                    'ttm_periods': len(ttm_columns)
                 }
+            else:
+                # Fallback to annual data if no quarterly data
+                latest_year = income_stmt.columns[0] if not income_stmt.empty else None
+                if latest_year:
+                    financial_data['income_statement'] = {
+                        'revenue': self.safe_get_value(income_stmt, 'Total Revenue', latest_year),
+                        'gross_profit': self.safe_get_value(income_stmt, 'Gross Profit', latest_year),
+                        'operating_income': self.safe_get_value(income_stmt, 'Operating Income', latest_year),
+                        'net_income': self.safe_get_value(income_stmt, 'Net Income', latest_year),
+                        'ebitda': self.safe_get_value(income_stmt, 'EBITDA', latest_year),
+                        'fiscal_year': latest_year.year,
+                        'ttm_periods': 1
+                    }
             
             # Parse balance sheet
             if not balance_sheet.empty:
@@ -268,47 +298,59 @@ class YahooFinanceService:
             return None
 
     def store_fundamental_data(self, ticker: str, financial_data: Dict, key_stats: Dict) -> bool:
-        """Store fundamental data in database"""
+        """Store comprehensive fundamental data in the database"""
         try:
-            # Prepare values for stocks table
-            diluted_eps_ttm = None
-            book_value_per_share = None
-            revenue_ttm = None
-            ebitda_ttm = None
-            shareholders_equity = None
-            if key_stats and key_stats.get('per_share_metrics'):
-                diluted_eps_ttm = key_stats['per_share_metrics'].get('eps_diluted')
-                book_value_per_share = key_stats['per_share_metrics'].get('book_value_per_share')
-            if financial_data and financial_data.get('income_statement'):
-                revenue_ttm = financial_data['income_statement'].get('revenue')
-                ebitda_ttm = financial_data['income_statement'].get('ebitda')
-            if financial_data and financial_data.get('balance_sheet'):
-                shareholders_equity = financial_data['balance_sheet'].get('total_equity')
+            # Extract data from financial_data and key_stats for insertion
+            income = financial_data.get('income_statement', {}) if financial_data else {}
+            balance = financial_data.get('balance_sheet', {}) if financial_data else {}
+            cash_flow = financial_data.get('cash_flow', {}) if financial_data else {}
+            market_data = key_stats.get('market_data', {}) if key_stats else {}
+            per_share = key_stats.get('per_share_metrics', {}) if key_stats else {}
 
-            # Debug log the values to be written
-            logging.info(f"[DEBUG] For {ticker}: diluted_eps_ttm={diluted_eps_ttm}, book_value_per_share={book_value_per_share}, revenue_ttm={revenue_ttm}, ebitda_ttm={ebitda_ttm}, shareholders_equity={shareholders_equity}")
+            # Prepare a dictionary of all columns to update in the 'stocks' table
+            update_data = {
+                'market_cap': market_data.get('market_cap'),
+                'enterprise_value': market_data.get('enterprise_value'),
+                'shares_outstanding': market_data.get('shares_outstanding'),
+                'revenue_ttm': income.get('revenue'),
+                'net_income_ttm': income.get('net_income'),
+                'ebitda_ttm': income.get('ebitda'),
+                'diluted_eps_ttm': per_share.get('eps_diluted'),
+                'book_value_per_share': per_share.get('book_value_per_share'),
+                'total_debt': balance.get('total_debt'),
+                'shareholders_equity': balance.get('total_equity'),
+                'cash_and_equivalents': balance.get('cash_and_equivalents'),
+                'fundamentals_last_update': datetime.now()
+            }
 
-            # Update stocks table with key metrics and new fields
-            if key_stats and key_stats.get('market_data'):
-                market_data = key_stats['market_data']
-                self.cur.execute("""
-                    UPDATE stocks 
-                    SET market_cap = %s, enterprise_value = %s, shares_outstanding = %s,
-                        diluted_eps_ttm = %s, book_value_per_share = %s, revenue_ttm = %s, ebitda_ttm = %s, shareholders_equity = %s,
-                        fundamentals_last_update = CURRENT_TIMESTAMP
-                    WHERE ticker = %s
-                """, (
-                    market_data.get('market_cap'),
-                    market_data.get('enterprise_value'),
-                    market_data.get('shares_outstanding'),
-                    diluted_eps_ttm,
-                    book_value_per_share,
-                    revenue_ttm,
-                    ebitda_ttm,
-                    shareholders_equity,
-                    ticker
-                ))
+            # Log TTM calculations for debugging
+            if income.get('revenue'):
+                logging.info(f"{ticker} TTM Revenue: ${income.get('revenue'):,.0f} (from {income.get('ttm_periods', 1)} periods)")
+                if income.get('revenue_annual'):
+                    logging.info(f"{ticker} Annual Revenue: ${income.get('revenue_annual'):,.0f}")
+            if income.get('net_income'):
+                logging.info(f"{ticker} TTM Net Income: ${income.get('net_income'):,.0f}")
+            if income.get('ebitda'):
+                logging.info(f"{ticker} TTM EBITDA: ${income.get('ebitda'):,.0f}")
+
+            # Filter out None values to avoid overwriting existing data with NULL
+            update_data = {k: v for k, v in update_data.items() if v is not None}
             
+            if not update_data:
+                logging.warning(f"No new data to update for {ticker}")
+                return False
+
+            # Build the SET part of the SQL query dynamically
+            set_clause = ", ".join([f"{key} = %s" for key in update_data.keys()])
+            values = list(update_data.values()) + [ticker]
+
+            # Execute the update query
+            self.cur.execute(f"""
+                UPDATE stocks 
+                SET {set_clause}
+                WHERE ticker = %s
+            """, tuple(values))
+
             # Store in company_fundamentals table
             if financial_data and financial_data.get('income_statement'):
                 income = financial_data['income_statement']
@@ -335,15 +377,6 @@ class YahooFinanceService:
                     income.get('operating_income'), income.get('net_income'),
                     income.get('ebitda'), 'yahoo_finance', datetime.now()
                 ))
-            
-            # Store in stocks table for shares_outstanding (legacy, now included above)
-            # if key_stats and key_stats.get('market_data') and key_stats['market_data'].get('shares_outstanding') is not None:
-            #     shares_outstanding = key_stats['market_data']['shares_outstanding']
-            #     self.cur.execute("""
-            #         UPDATE stocks 
-            #         SET shares_outstanding = %s, last_updated = CURRENT_TIMESTAMP
-            #         WHERE ticker = %s
-            #     """, (shares_outstanding, ticker))
             
             self.conn.commit()
             logging.info(f"Successfully stored fundamental data for {ticker}")

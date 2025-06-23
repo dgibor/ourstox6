@@ -139,42 +139,55 @@ class FinnhubService:
             return None
 
     def parse_finnhub_financials(self, ticker: str, data: List[Dict]) -> Optional[Dict]:
-        """Parse Finnhub financial data and map to our schema"""
+        """Parse Finnhub financial data using dynamic keyword matching."""
         try:
             if not data:
                 return None
             
-            # Get most recent financial data
-            latest_data = data[0] if data else {}
+            latest_data = data[0]
+            report = latest_data.get('report', {})
             
-            financial_data = {
+            # Create a flattened dictionary of all report items for easy searching
+            all_reports = {item['label'].lower(): item['value'] for section in ['ic', 'bs', 'cf'] for item in report.get(section, [])}
+
+            # This mapping holds keywords to dynamically find the correct label
+            KEYWORD_MAP = {
+                'revenue': ['revenue', 'sales'],
+                'net_income': ['net income', 'netincomeloss'],
+                'shareholders_equity': ['shareholder', 'equity'],
+                'shares_outstanding': ['diluted (in shares)', 'shares outstanding'],
+                'total_debt': ['total liabilities'],
+                'cash_and_equivalents': ['cash and cash equivalents'],
+                'operating_income': ['operating income'],
+                'interest_expense': ['interest expense'],
+                'tax_expense': ['income tax', 'provision for income taxes'],
+                'depreciation_amortization': ['depreciation', 'amortization']
+            }
+
+            parsed_data = {}
+            for field, keywords in KEYWORD_MAP.items():
+                for keyword in keywords:
+                    for label, value in all_reports.items():
+                        if keyword in label:
+                            parsed_data[field] = float(value)
+                            break
+                    if field in parsed_data:
+                        break
+            
+            # Calculate EBITDA robustly
+            oi, ie, te, da = parsed_data.get('operating_income'), parsed_data.get('interest_expense'), parsed_data.get('tax_expense'), parsed_data.get('depreciation_amortization')
+            if all(isinstance(v, (int, float)) for v in [oi, ie, te, da]):
+                parsed_data['ebitda'] = oi + ie + te + da # A common approximation
+
+            return {
                 'ticker': ticker,
                 'data_source': 'finnhub',
                 'last_updated': datetime.now(),
-                'income_statement': {},
-                'balance_sheet': {},
-                'cash_flow': {},
-                'quality_score': 0
+                'income_statement': parsed_data,
             }
             
-            # Parse income statement data
-            income_data = {}
-            for field, finnhub_field in FINNHUB_MAPPING.items():
-                if finnhub_field in latest_data:
-                    value = latest_data[finnhub_field]
-                    if value is not None:
-                        income_data[field] = float(value)
-            
-            financial_data['income_statement'] = income_data
-            
-            # Calculate quality score based on data completeness
-            quality_score = self.calculate_data_quality(latest_data)
-            financial_data['quality_score'] = quality_score
-            
-            return financial_data
-            
         except Exception as e:
-            logging.error(f"Error parsing Finnhub financials for {ticker}: {e}")
+            logging.error(f"Error parsing Finnhub financials for {ticker}: {e}", exc_info=True)
             return None
 
     def parse_company_profile(self, ticker: str, data: Dict) -> Optional[Dict]:

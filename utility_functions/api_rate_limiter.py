@@ -17,7 +17,8 @@ DB_CONFIG = {
 API_LIMITS = {
     'yahoo': {'calls_per_hour': 2000, 'calls_per_day': 20000, 'reset_hour': 0},
     'finnhub': {'calls_per_minute': 60, 'calls_per_day': 86400, 'reset_hour': 0},
-    'alphavantage': {'calls_per_minute': 5, 'calls_per_day': 500, 'reset_hour': 0}
+    'alphavantage': {'calls_per_minute': 5, 'calls_per_day': 500, 'reset_hour': 0},
+    'fmp': {'calls_per_minute': 30, 'calls_per_day': 1000, 'reset_hour': 0}  # Free tier limits
 }
 
 class APIRateLimiter:

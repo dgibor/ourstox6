@@ -50,6 +50,7 @@ DB_CONFIG = {
 # API configurations
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
+FMP_API_KEY = os.getenv('FMP_API_KEY')
 
 # Constants
 BATCH_SIZE = 500
@@ -295,6 +296,56 @@ class PriceCollector:
         
         return prices_data, failed
 
+    def get_fmp_price(self, ticker: str) -> Dict:
+        """Get price from FMP API with usage tracking"""
+        provider = 'fmp'
+        endpoint = 'quote'
+        if not self.api_limiter.check_limit(provider, endpoint):
+            logging.warning(f"FMP API limit reached, skipping {ticker}")
+            return None
+        try:
+            url = f"https://financialmodelingprep.com/api/v3/quote/{ticker}"
+            params = {'apikey': FMP_API_KEY}
+            response = requests.get(url, params=params, timeout=30)
+            self.api_limiter.record_call(provider, endpoint)
+            if response.status_code == 200:
+                data = response.json()
+                if data and isinstance(data, list) and len(data) > 0:
+                    return data[0]  # Return first (and usually only) quote
+                elif data and isinstance(data, dict):
+                    return data
+            return None
+        except Exception as e:
+            logging.error(f"FMP API error for {ticker}: {e}")
+            return None
+
+    def collect_fmp_prices(self, tickers: List[str]) -> Tuple[Dict[str, dict], List[str]]:
+        """Collect prices using FMP API and return price data"""
+        prices_data = {}
+        failed = []
+        
+        for ticker in tickers[:500]:  # Limit to 500 calls to preserve quota
+            try:
+                data = self.get_fmp_price(ticker)
+                if data and data.get('price') is not None:
+                    # Convert FMP data to our format
+                    prices_data[ticker] = {
+                        'open': int(round(float(data.get('open', data.get('price', 0))) * 100)),
+                        'high': int(round(float(data.get('dayHigh', data.get('price', 0))) * 100)),
+                        'low': int(round(float(data.get('dayLow', data.get('price', 0))) * 100)),
+                        'close': int(round(float(data.get('price', 0)) * 100)),
+                        'volume': int(data.get('volume', 0)) if data.get('volume') else None
+                    }
+                    logging.info(f"Successfully got FMP price for {ticker}")
+                else:
+                    failed.append(ticker)
+                time.sleep(2)  # Rate limiting - 2 seconds between calls
+            except Exception as e:
+                logging.error(f"Error processing {ticker} with FMP: {e}")
+                failed.append(ticker)
+        
+        return prices_data, failed
+
     def get_previous_close(self, tickers: List[str]) -> Dict[str, dict]:
         """Get previous close prices from database as fallback"""
         prices_data = {}
@@ -425,9 +476,18 @@ class PriceCollector:
                     self.successful_tickers.extend(list(alpha_prices.keys()))
                 self.failed_tickers = failed
 
-            # Phase 6: Previous Close Fallback (final fallback)
+            # Phase 6: FMP (fourth fallback)
             if self.failed_tickers:
-                logging.info(f"Phase 6: Previous close fallback for {len(self.failed_tickers)} failed tickers")
+                logging.info(f"Phase 6: FMP for {len(self.failed_tickers)} failed tickers")
+                fmp_prices, failed = self.collect_fmp_prices(self.failed_tickers)
+                if fmp_prices:
+                    self.update_database(fmp_prices)
+                    self.successful_tickers.extend(list(fmp_prices.keys()))
+                self.failed_tickers = failed
+
+            # Phase 7: Previous Close Fallback (final fallback)
+            if self.failed_tickers:
+                logging.info(f"Phase 7: Previous close fallback for {len(self.failed_tickers)} failed tickers")
                 previous_prices = self.get_previous_close(self.failed_tickers)
                 if previous_prices:
                     self.update_database(previous_prices)

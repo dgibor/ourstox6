@@ -174,28 +174,30 @@ class FinancialRatiosCalculator:
             """, (ticker,))
             
             price_data = self.cur.fetchone()
-            current_price = price_data[0] if price_data else None
+            current_price = price_data[0] / 100.0 if price_data and price_data[0] else None  # Convert cents to dollars
             
             # Calculate derived values
-            working_capital = (stock_data[10] or 0) - (stock_data[11] or 0)  # current_assets - current_liabilities
+            current_assets = float(stock_data[10]) if stock_data[10] else 0
+            current_liabilities = float(stock_data[11]) if stock_data[11] else 0
+            working_capital = current_assets - current_liabilities
             
             return {
                 'ticker': stock_data[0],
-                'current_price': current_price,
-                'market_cap': stock_data[1],
-                'shares_outstanding': stock_data[2],
-                'diluted_eps_ttm': stock_data[3],
-                'book_value_per_share': stock_data[4],
-                'revenue_ttm': stock_data[5],
-                'net_income_ttm': stock_data[6],
-                'total_assets': stock_data[7],
-                'total_debt': stock_data[8],
-                'shareholders_equity': stock_data[9],
-                'working_capital': working_capital,
-                'cash_and_equivalents': stock_data[12],
-                'operating_income': stock_data[13],
-                'ebitda_ttm': stock_data[14],
-                'sales': stock_data[5]  # revenue_ttm
+                'current_price': float(current_price) if current_price else None,
+                'market_cap': float(stock_data[1]) if stock_data[1] else None,
+                'shares_outstanding': float(stock_data[2]) if stock_data[2] else None,
+                'diluted_eps_ttm': float(stock_data[3]) if stock_data[3] else None,
+                'book_value_per_share': float(stock_data[4]) if stock_data[4] else None,
+                'revenue_ttm': float(stock_data[5]) if stock_data[5] else None,
+                'net_income_ttm': float(stock_data[6]) if stock_data[6] else None,
+                'total_assets': float(stock_data[7]) if stock_data[7] else None,
+                'total_debt': float(stock_data[8]) if stock_data[8] else None,
+                'shareholders_equity': float(stock_data[9]) if stock_data[9] else None,
+                'working_capital': float(working_capital),
+                'cash_and_equivalents': float(stock_data[12]) if stock_data[12] else None,
+                'operating_income': float(stock_data[13]) if stock_data[13] else None,
+                'ebitda_ttm': float(stock_data[14]) if stock_data[14] else None,
+                'sales': float(stock_data[5]) if stock_data[5] else None  # revenue_ttm
             }
             
         except Exception as e:
