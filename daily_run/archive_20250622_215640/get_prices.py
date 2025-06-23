@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 from typing import List, Dict, Tuple
 import concurrent.futures
 from ratelimit import limits, sleep_and_retry
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utility_functions.api_rate_limiter import APIRateLimiter
 
 # Load environment variables
 load_dotenv()
@@ -47,6 +50,7 @@ DB_CONFIG = {
 # API configurations
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
+FMP_API_KEY = os.getenv('FMP_API_KEY')
 
 # Constants
 BATCH_SIZE = 500
@@ -64,6 +68,7 @@ class PriceCollector:
         self.cur = None
         self.test_mode = test_mode
         self.setup_database()
+        self.api_limiter = APIRateLimiter()
 
     def setup_database(self):
         """Initialize database connection"""
@@ -197,13 +202,17 @@ class PriceCollector:
         
         return prices_data, failed
 
-    @sleep_and_retry
-    @limits(calls=FINNHUB_CALLS_PER_MIN, period=60)
     def get_finnhub_price(self, ticker: str) -> Dict:
-        """Get price from Finnhub API with rate limiting"""
+        """Get price from Finnhub API with rate limiting and usage tracking"""
+        provider = 'finnhub'
+        endpoint = 'quote'
+        if not self.api_limiter.check_limit(provider, endpoint):
+            logging.warning(f"Finnhub API limit reached, skipping {ticker}")
+            return None
         try:
             url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB_API_KEY}"
             response = requests.get(url)
+            self.api_limiter.record_call(provider, endpoint)
             if response.status_code == 200:
                 return response.json()
             return None
@@ -239,10 +248,16 @@ class PriceCollector:
         return prices_data, failed
 
     def get_alpha_vantage_price(self, ticker: str) -> Dict:
-        """Get price from Alpha Vantage API"""
+        """Get price from Alpha Vantage API with usage tracking"""
+        provider = 'alphavantage'
+        endpoint = 'GLOBAL_QUOTE'
+        if not self.api_limiter.check_limit(provider, endpoint):
+            logging.warning(f"Alpha Vantage API limit reached, skipping {ticker}")
+            return None
         try:
             url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
             response = requests.get(url)
+            self.api_limiter.record_call(provider, endpoint)
             if response.status_code == 200:
                 return response.json()
             return None
@@ -277,6 +292,56 @@ class PriceCollector:
                 time.sleep(15)  # Rate limiting for Alpha Vantage
             except Exception as e:
                 logging.error(f"Error processing {ticker} with Alpha Vantage: {e}")
+                failed.append(ticker)
+        
+        return prices_data, failed
+
+    def get_fmp_price(self, ticker: str) -> Dict:
+        """Get price from FMP API with usage tracking"""
+        provider = 'fmp'
+        endpoint = 'quote'
+        if not self.api_limiter.check_limit(provider, endpoint):
+            logging.warning(f"FMP API limit reached, skipping {ticker}")
+            return None
+        try:
+            url = f"https://financialmodelingprep.com/api/v3/quote/{ticker}"
+            params = {'apikey': FMP_API_KEY}
+            response = requests.get(url, params=params, timeout=30)
+            self.api_limiter.record_call(provider, endpoint)
+            if response.status_code == 200:
+                data = response.json()
+                if data and isinstance(data, list) and len(data) > 0:
+                    return data[0]  # Return first (and usually only) quote
+                elif data and isinstance(data, dict):
+                    return data
+            return None
+        except Exception as e:
+            logging.error(f"FMP API error for {ticker}: {e}")
+            return None
+
+    def collect_fmp_prices(self, tickers: List[str]) -> Tuple[Dict[str, dict], List[str]]:
+        """Collect prices using FMP API and return price data"""
+        prices_data = {}
+        failed = []
+        
+        for ticker in tickers[:500]:  # Limit to 500 calls to preserve quota
+            try:
+                data = self.get_fmp_price(ticker)
+                if data and data.get('price') is not None:
+                    # Convert FMP data to our format
+                    prices_data[ticker] = {
+                        'open': int(round(float(data.get('open', data.get('price', 0))) * 100)),
+                        'high': int(round(float(data.get('dayHigh', data.get('price', 0))) * 100)),
+                        'low': int(round(float(data.get('dayLow', data.get('price', 0))) * 100)),
+                        'close': int(round(float(data.get('price', 0)) * 100)),
+                        'volume': int(data.get('volume', 0)) if data.get('volume') else None
+                    }
+                    logging.info(f"Successfully got FMP price for {ticker}")
+                else:
+                    failed.append(ticker)
+                time.sleep(2)  # Rate limiting - 2 seconds between calls
+            except Exception as e:
+                logging.error(f"Error processing {ticker} with FMP: {e}")
                 failed.append(ticker)
         
         return prices_data, failed
@@ -344,6 +409,20 @@ class PriceCollector:
             logging.error(f"Database update error: {e}")
             raise
 
+    def get_api_remaining_quota(self, provider: str, endpoint: str) -> int:
+        """Utility to check remaining quota for a provider/endpoint"""
+        today = datetime.utcnow().date()
+        self.api_limiter.cur.execute(
+            "SELECT calls_made, calls_limit FROM api_usage_tracking WHERE api_provider=%s AND date=%s AND endpoint=%s",
+            (provider, today, endpoint)
+        )
+        row = self.api_limiter.cur.fetchone()
+        if row:
+            calls_made, calls_limit = row
+            return max(0, calls_limit - calls_made)
+        else:
+            return API_LIMITS[provider]['calls_per_day']
+
     def run(self):
         """Main execution function with improved fallback sequence"""
         try:
@@ -397,9 +476,18 @@ class PriceCollector:
                     self.successful_tickers.extend(list(alpha_prices.keys()))
                 self.failed_tickers = failed
 
-            # Phase 6: Previous Close Fallback (final fallback)
+            # Phase 6: FMP (fourth fallback)
             if self.failed_tickers:
-                logging.info(f"Phase 6: Previous close fallback for {len(self.failed_tickers)} failed tickers")
+                logging.info(f"Phase 6: FMP for {len(self.failed_tickers)} failed tickers")
+                fmp_prices, failed = self.collect_fmp_prices(self.failed_tickers)
+                if fmp_prices:
+                    self.update_database(fmp_prices)
+                    self.successful_tickers.extend(list(fmp_prices.keys()))
+                self.failed_tickers = failed
+
+            # Phase 7: Previous Close Fallback (final fallback)
+            if self.failed_tickers:
+                logging.info(f"Phase 7: Previous close fallback for {len(self.failed_tickers)} failed tickers")
                 previous_prices = self.get_previous_close(self.failed_tickers)
                 if previous_prices:
                     self.update_database(previous_prices)
@@ -423,6 +511,7 @@ class PriceCollector:
         finally:
             if self.conn:
                 self.conn.close()
+            self.api_limiter.close()
 
 if __name__ == "__main__":
     import sys
