@@ -12,6 +12,7 @@ from ratelimit import limits, sleep_and_retry
 from base_service import BaseService
 from config import Config
 from exceptions import ServiceError, RateLimitError, DataNotFoundError
+from apiratelimiter import APIRateLimiter
 
 class YahooPriceService(BaseService):
     """Yahoo Finance price service"""
@@ -58,8 +59,6 @@ class AlphaVantagePriceService(BaseService):
     def __init__(self):
         super().__init__('alpha_vantage')
     
-    @sleep_and_retry
-    @limits(calls=5, period=60)  # Alpha Vantage free tier: 5 calls per minute
     def get_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         """Get price data from Alpha Vantage"""
         if not self.validate_ticker(ticker):
@@ -102,8 +101,6 @@ class FinnhubPriceService(BaseService):
     def __init__(self):
         super().__init__('finnhub')
     
-    @sleep_and_retry
-    @limits(calls=60, period=60)
     def get_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         """Get price data from Finnhub"""
         if not self.validate_ticker(ticker):
@@ -138,8 +135,6 @@ class FMPPriceService(BaseService):
     def __init__(self):
         super().__init__('fmp')
     
-    @sleep_and_retry
-    @limits(calls=300, period=60)
     def get_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         """Get price data from FMP"""
         if not self.validate_ticker(ticker):
@@ -241,39 +236,51 @@ class PriceCollector:
             return None
     
     def collect_prices_batch(self, tickers: List[str]) -> Tuple[Dict[str, Dict], List[str]]:
-        """Collect prices for a batch of tickers with fallback and batch API calls"""
+        """Collect prices for a batch of tickers with fallback and exponential backoff"""
         prices_data = {}
         failed_tickers = []
+        global_cooldown = 0
+        max_backoff = 60  # seconds
+        backoff = 2
         
-        # Try batch requests first (where supported)
-        batch_prices = self._try_batch_requests(tickers)
-        prices_data.update(batch_prices)
-        
-        # Get remaining tickers that weren't found in batch requests
-        remaining_tickers = [t for t in tickers if t not in batch_prices]
-        
-        # Process remaining tickers individually
-        for ticker in remaining_tickers:
+        for ticker in tickers:
             ticker_data = None
+            rate_limited = False
             
             # Try each service in order
             for service_name in self.service_order:
                 try:
                     service = self.services[service_name]
+                    # Use APIRateLimiter for all rate limiting
+                    if hasattr(service, 'api_limiter'):
+                        if not service.api_limiter.check_limit(service_name, 'price'):
+                            rate_limited = True
+                            continue
                     ticker_data = service.get_data(ticker)
                     if ticker_data:
                         prices_data[ticker] = ticker_data
                         break
                 except RateLimitError:
-                    # Skip to next service on rate limit
+                    rate_limited = True
                     continue
                 except Exception as e:
-                    # Log error and continue to next service
                     service.log_request(ticker, False, str(e))
                     continue
             
             if not ticker_data:
                 failed_tickers.append(ticker)
+                if rate_limited:
+                    # Exponential backoff if all providers are rate limited
+                    print(f"All providers rate limited for {ticker}, backing off for {backoff}s...")
+                    import time
+                    time.sleep(backoff)
+                    global_cooldown += backoff
+                    backoff = min(backoff * 2, max_backoff)
+                else:
+                    backoff = 2  # Reset backoff if not rate limited
+        
+        if global_cooldown > 0:
+            print(f"Global cooldown applied: {global_cooldown}s")
         
         return prices_data, failed_tickers
     
@@ -344,9 +351,6 @@ class PriceCollector:
                 if data:
                     batch_prices[ticker] = data
                 
-                # Rate limiting delay between calls
-                time.sleep(12)  # Alpha Vantage free tier: 5 calls per minute = 12 seconds between calls
-                
             except Exception as e:
                 print(f"Alpha Vantage batch request error for {ticker}: {e}")
                 continue
@@ -381,7 +385,8 @@ class PriceCollector:
         
         try:
             for ticker, price_data in prices_data.items():
-                db.update_price_data(ticker, price_data, self.target_table)
+                # Always use daily_charts table for price data, regardless of target_table
+                db.update_price_data(ticker, price_data, 'daily_charts')
                 updated_count += 1
         finally:
             db.disconnect()

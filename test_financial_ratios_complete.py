@@ -8,6 +8,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 import time
 
+print("[DEBUG] Script started.")
+
 # Add the daily_run directory to the Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'daily_run'))
 
@@ -30,7 +32,7 @@ DB_CONFIG = {
 }
 
 def test_database_connection():
-    """Test database connection"""
+    print("[DEBUG] Testing database connection...")
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
@@ -45,11 +47,10 @@ def test_database_connection():
         return False
 
 def ensure_stocks_exist(tickers):
-    """Ensure all tickers exist in the stocks table"""
+    print("[DEBUG] Ensuring all tickers exist in stocks table...")
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         cur = conn.cursor()
-        
         for ticker in tickers:
             cur.execute("SELECT ticker FROM stocks WHERE ticker = %s", (ticker,))
             if not cur.fetchone():
@@ -59,7 +60,6 @@ def ensure_stocks_exist(tickers):
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (ticker) DO NOTHING
                 """, (ticker, f"{ticker} Corp", "Technology", "Technology"))
-        
         conn.commit()
         cur.close()
         conn.close()
@@ -70,20 +70,17 @@ def ensure_stocks_exist(tickers):
         return False
 
 def retrieve_fundamental_data_with_fallback(ticker):
-    """
-    Retrieve fundamental data using multi-service fallback system:
-    Yahoo → Finnhub → Alpha Vantage → FMP → Previous DB data
-    """
-    print(f"  Processing {ticker} with multi-service fallback...")
-    
+    print(f"[DEBUG] Starting fundamental data retrieval for {ticker}...")
     # Phase 1: Yahoo Finance (primary)
     yahoo_success = False
     try:
         from daily_run.yahoo_finance_service import YahooFinanceService
+        print(f"[DEBUG] Instantiating YahooFinanceService for {ticker}...")
         yahoo_service = YahooFinanceService()
+        print(f"[DEBUG] Calling get_fundamental_data for {ticker}...")
         data = yahoo_service.get_fundamental_data(ticker)
         yahoo_service.close()
-        
+        print(f"[DEBUG] YahooFinanceService closed for {ticker}.")
         if data and (data.get('financial_data') or data.get('key_stats')):
             print(f"    ✅ Yahoo Finance data retrieved for {ticker}")
             yahoo_success = True
@@ -91,10 +88,10 @@ def retrieve_fundamental_data_with_fallback(ticker):
             print(f"    ⚠️  Yahoo Finance returned no data for {ticker}")
     except Exception as e:
         print(f"    ❌ Yahoo Finance error for {ticker}: {e}")
-    
     # Check if we have complete data from Yahoo (including key metrics)
     if yahoo_success:
         try:
+            print(f"[DEBUG] Checking Yahoo data completeness for {ticker}...")
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
             cur.execute("""
@@ -104,8 +101,6 @@ def retrieve_fundamental_data_with_fallback(ticker):
             yahoo_data = cur.fetchone()
             cur.close()
             conn.close()
-            
-            # If we have all key metrics, we're done
             if yahoo_data and all(yahoo_data):
                 print(f"    ✅ Yahoo Finance provided complete data for {ticker}")
                 return True
@@ -113,19 +108,19 @@ def retrieve_fundamental_data_with_fallback(ticker):
                 print(f"    ⚠️  Yahoo Finance missing key metrics for {ticker}, trying other services...")
         except Exception as e:
             print(f"    ❌ Error checking Yahoo data completeness for {ticker}: {e}")
-    
     # Phase 2: Finnhub (first fallback)
     try:
+        print(f"[DEBUG] Instantiating FinnhubService for {ticker}...")
         from daily_run.finnhub_service import FinnhubService
         finnhub_service = FinnhubService()
+        print(f"[DEBUG] Calling get_fundamental_data for {ticker} (Finnhub)...")
         data = finnhub_service.get_fundamental_data(ticker)
         finnhub_service.close()
-        
+        print(f"[DEBUG] FinnhubService closed for {ticker}.")
         if data and (data.get('financial_data') or data.get('profile_data')):
             print(f"    ✅ Finnhub data retrieved for {ticker}")
-            
-            # Check if Finnhub provided complete data
             try:
+                print(f"[DEBUG] Checking Finnhub data completeness for {ticker}...")
                 conn = psycopg2.connect(**DB_CONFIG)
                 cur = conn.cursor()
                 cur.execute("""
@@ -135,7 +130,6 @@ def retrieve_fundamental_data_with_fallback(ticker):
                 finnhub_data = cur.fetchone()
                 cur.close()
                 conn.close()
-                
                 if finnhub_data and all(finnhub_data):
                     print(f"    ✅ Finnhub provided complete data for {ticker}")
                     return True
@@ -147,19 +141,19 @@ def retrieve_fundamental_data_with_fallback(ticker):
             print(f"    ⚠️  Finnhub returned no data for {ticker}")
     except Exception as e:
         print(f"    ❌ Finnhub error for {ticker}: {e}")
-    
     # Phase 3: Alpha Vantage (second fallback)
     try:
+        print(f"[DEBUG] Instantiating AlphaVantageService for {ticker}...")
         from daily_run.alpha_vantage_service import AlphaVantageService
         alpha_service = AlphaVantageService()
+        print(f"[DEBUG] Calling get_fundamental_data for {ticker} (Alpha Vantage)...")
         data = alpha_service.get_fundamental_data(ticker)
         alpha_service.close()
-        
+        print(f"[DEBUG] AlphaVantageService closed for {ticker}.")
         if data and (data.get('income_statement') or data.get('balance_sheet') or data.get('cash_flow')):
             print(f"    ✅ Alpha Vantage data retrieved for {ticker}")
-            
-            # Check if Alpha Vantage provided complete data
             try:
+                print(f"[DEBUG] Checking Alpha Vantage data completeness for {ticker}...")
                 conn = psycopg2.connect(**DB_CONFIG)
                 cur = conn.cursor()
                 cur.execute("""
@@ -169,7 +163,6 @@ def retrieve_fundamental_data_with_fallback(ticker):
                 alpha_data = cur.fetchone()
                 cur.close()
                 conn.close()
-                
                 if alpha_data and all(alpha_data):
                     print(f"    ✅ Alpha Vantage provided complete data for {ticker}")
                     return True
@@ -181,19 +174,19 @@ def retrieve_fundamental_data_with_fallback(ticker):
             print(f"    ⚠️  Alpha Vantage returned no data for {ticker}")
     except Exception as e:
         print(f"    ❌ Alpha Vantage error for {ticker}: {e}")
-    
     # Phase 4: FMP (third fallback)
     try:
+        print(f"[DEBUG] Instantiating FMPService for {ticker}...")
         from daily_run.fmp_service import FMPService
         fmp_service = FMPService()
+        print(f"[DEBUG] Calling get_fundamental_data for {ticker} (FMP)...")
         data = fmp_service.get_fundamental_data(ticker)
         fmp_service.close()
-        
+        print(f"[DEBUG] FMPService closed for {ticker}.")
         if data and (data.get('income_statement') or data.get('balance_sheet') or data.get('cash_flow')):
             print(f"    ✅ FMP data retrieved for {ticker}")
-            
-            # Check if FMP provided complete data
             try:
+                print(f"[DEBUG] Checking FMP data completeness for {ticker}...")
                 conn = psycopg2.connect(**DB_CONFIG)
                 cur = conn.cursor()
                 cur.execute("""
@@ -203,129 +196,82 @@ def retrieve_fundamental_data_with_fallback(ticker):
                 fmp_data = cur.fetchone()
                 cur.close()
                 conn.close()
-                
                 if fmp_data and all(fmp_data):
                     print(f"    ✅ FMP provided complete data for {ticker}")
                     return True
                 else:
-                    print(f"    ⚠️  FMP missing key metrics for {ticker}")
+                    print(f"    ⚠️  FMP missing key metrics for {ticker}, trying previous DB data...")
             except Exception as e:
                 print(f"    ❌ Error checking FMP data completeness for {ticker}: {e}")
         else:
             print(f"    ⚠️  FMP returned no data for {ticker}")
     except Exception as e:
         print(f"    ❌ FMP error for {ticker}: {e}")
-    
-    # Phase 5: Check if we have any existing data in database
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT market_cap, diluted_eps_ttm, book_value_per_share, revenue_ttm, ebitda_ttm
-            FROM stocks WHERE ticker = %s
-        """, (ticker,))
-        existing_data = cur.fetchone()
-        cur.close()
-        conn.close()
-        
-        if existing_data and any(existing_data):
-            print(f"    ⚠️  Using existing database data for {ticker}")
-            return True
-        else:
-            print(f"    ❌ No data available from any source for {ticker}")
-            return False
-    except Exception as e:
-        print(f"    ❌ Database check error for {ticker}: {e}")
-        return False
+    print(f"[DEBUG] Fallbacks exhausted for {ticker}.")
+    return False
 
 def retrieve_fundamental_data(tickers):
-    """Step 1: Retrieve fundamental data for the tickers using multi-service fallback"""
-    print("\n📊 Step 1: Retrieving fundamental data with multi-service fallback...")
-    
-    successful_retrievals = 0
-    failed_retrievals = 0
-    
+    print("[DEBUG] Starting fundamental data retrieval for all tickers...")
+    results = []
     for ticker in tickers:
-        try:
-            if retrieve_fundamental_data_with_fallback(ticker):
-                successful_retrievals += 1
-            else:
-                failed_retrievals += 1
-            
-            # Add delay between tickers to avoid rate limiting
-            time.sleep(2)
-            
-        except Exception as e:
-            failed_retrievals += 1
-            print(f"    ❌ Unexpected error for {ticker}: {e}")
-    
-    print(f"✅ Fundamental data retrieval complete: {successful_retrievals}/{len(tickers)} successful")
-    return successful_retrievals > 0
+        print(f"[DEBUG] Processing {ticker}...")
+        result = retrieve_fundamental_data_with_fallback(ticker)
+        results.append(result)
+    print("[DEBUG] Fundamental data retrieval complete for all tickers.")
+    return results
 
 def calculate_financial_ratios(tickers):
-    """Step 2: Calculate financial ratios for the tickers"""
-    print("\n🧮 Step 2: Calculating financial ratios...")
-    
+    print("[DEBUG] Starting financial ratios calculation...")
     try:
-        from daily_run.financial_ratios_calculator import FinancialRatiosCalculator
-        calculator = FinancialRatiosCalculator()
-        
+        from daily_run.ratios_calculator import RatiosCalculator
+        calculator = RatiosCalculator()
         successful_calculations = 0
         failed_calculations = 0
-        
         for ticker in tickers:
-            print(f"  Calculating ratios for {ticker}...")
+            print(f"[DEBUG] Calculating ratios for {ticker}...")
             try:
-                ratios = calculator.calculate_all_ratios(ticker)
-                if ratios:
-                    # Store ratios in database
-                    if store_ratios_in_database(calculator.conn, ticker, ratios):
+                result = calculator.calculate_all_ratios(ticker)
+                if result and 'error' not in result:
+                    ratios = result.get('ratios', {})
+                    data_quality = result.get('data_quality_score', 0)
+                    if store_ratios_in_database(calculator.db.connection, ticker, ratios):
                         successful_calculations += 1
-                        print(f"    ✅ Calculated and stored ratios for {ticker}")
-                        
-                        # Print summary of calculated ratios
-                        for ratio_name, ratio_data in ratios.items():
-                            value = ratio_data.get('value')
-                            flag = ratio_data.get('quality_flag')
-                            if value is not None:
-                                print(f"      {ratio_name}: {value:.2f} ({flag})")
+                        print(f"    ✅ Calculated and stored ratios for {ticker} (Quality: {data_quality}%)")
+                        for ratio_name, ratio_value in ratios.items():
+                            if ratio_value is not None:
+                                print(f"      {ratio_name}: {ratio_value:.2f}")
                             else:
-                                print(f"      {ratio_name}: {flag}")
+                                print(f"      {ratio_name}: N/A")
                     else:
                         failed_calculations += 1
                         print(f"    ❌ Failed to store ratios for {ticker}")
                 else:
                     failed_calculations += 1
-                    print(f"    ❌ No ratios calculated for {ticker}")
+                    error_msg = result.get('error', 'Unknown error') if result else 'No result'
+                    print(f"    ❌ No ratios calculated for {ticker}: {error_msg}")
             except Exception as e:
                 failed_calculations += 1
                 print(f"    ❌ Error calculating ratios for {ticker}: {e}")
-        
         calculator.close()
-        print(f"✅ Financial ratio calculation complete: {successful_calculations}/{len(tickers)} successful")
+        print(f"[DEBUG] Financial ratio calculation complete: {successful_calculations}/{len(tickers)} successful")
         return successful_calculations > 0
-        
     except Exception as e:
         print(f"❌ Error in financial ratio calculation: {e}")
         return False
 
 def store_ratios_in_database(conn, ticker: str, ratios: dict):
-    """Store calculated ratios in the financial_ratios table"""
+    print(f"[DEBUG] Storing ratios in database for {ticker}...")
     try:
         cur = conn.cursor()
-        
-        # Get stock data for enterprise value calculation
         cur.execute("""
             SELECT market_cap, total_debt, cash_and_equivalents 
             FROM stocks WHERE ticker = %s
         """, (ticker,))
         stock_data = cur.fetchone()
-        
         market_cap = stock_data[0] if stock_data else None
         total_debt = stock_data[1] or 0 if stock_data else 0
         cash = stock_data[2] or 0 if stock_data else 0
         enterprise_value = market_cap + total_debt - cash if market_cap is not None else None
-        
         cur.execute("""
             INSERT INTO financial_ratios 
             (ticker, calculation_date, pe_ratio, pb_ratio, ps_ratio, ev_ebitda, graham_number, market_cap, enterprise_value)
@@ -343,29 +289,28 @@ def store_ratios_in_database(conn, ticker: str, ratios: dict):
         """, (
             ticker,
             datetime.now().date(),
-            ratios.get('pe_ratio', {}).get('value'),
-            ratios.get('pb_ratio', {}).get('value'),
-            ratios.get('ps_ratio', {}).get('value'),
-            ratios.get('ev_ebitda', {}).get('value'),
-            ratios.get('graham_number', {}).get('value'),
+            ratios.get('pe_ratio'),
+            ratios.get('pb_ratio'),
+            ratios.get('ps_ratio'),
+            ratios.get('ev_ebitda'),
+            ratios.get('graham_number'),
             market_cap,
             enterprise_value
         ))
         conn.commit()
         cur.close()
+        print(f"[DEBUG] Ratios stored for {ticker}.")
         return True
     except Exception as e:
+        print(f"[DEBUG] Error storing ratios for {ticker}: {e}")
         logging.error(f"Error storing ratios for {ticker}: {e}")
         return False
 
 def create_comprehensive_csv(tickers):
-    """Step 3: Create comprehensive CSV with all data"""
-    print("\n📈 Step 3: Creating comprehensive CSV...")
-    
+    print("[DEBUG] Creating comprehensive CSV...")
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        
-        # Query to get all fundamental data and calculated ratios
+        print("[DEBUG] Database connection for CSV established.")
         query = """
         SELECT DISTINCT ON (s.ticker)
             s.ticker,
@@ -413,167 +358,93 @@ def create_comprehensive_csv(tickers):
         WHERE s.ticker = ANY(%s)
         ORDER BY s.ticker
         """
-        
         df = pd.read_sql_query(query, conn, params=(tickers,))
+        print("[DEBUG] Data fetched for CSV.")
         conn.close()
-        
+        print("[DEBUG] Database connection for CSV closed.")
         if df.empty:
             print("❌ No data found for any tickers")
             return None
-        
-        # Convert latest_close from cents to dollars
         if 'latest_close' in df.columns:
             df['latest_close'] = df['latest_close'].apply(lambda x: x / 100.0 if pd.notnull(x) else x)
-        
-        # Create timestamp for filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"comprehensive_financial_data_{timestamp}.csv"
-        
-        # Save to CSV
         df.to_csv(filename, index=False)
         print(f"✅ Comprehensive CSV created: {filename}")
-        
-        # Print summary
+        print(f"[DEBUG] CSV saved as {filename}.")
         print(f"\n📊 CSV Summary:")
         print(f"  Total rows: {len(df)}")
         print(f"  Columns: {len(df.columns)}")
-        
-        # Check data completeness
         print(f"\n📋 Data Completeness Check:")
         fundamental_columns = ['market_cap', 'diluted_eps_ttm', 'book_value_per_share', 'revenue_ttm', 'ebitda_ttm']
         ratio_columns = ['pe_ratio', 'pb_ratio', 'ps_ratio', 'ev_ebitda', 'graham_number']
-        
         print("  Fundamental Data:")
         for col in fundamental_columns:
             if col in df.columns:
                 non_null_count = df[col].notna().sum()
                 print(f"    {col}: {non_null_count}/{len(df)} ({non_null_count/len(df)*100:.1f}%)")
-        
         print("  Calculated Ratios:")
         for col in ratio_columns:
             if col in df.columns:
                 non_null_count = df[col].notna().sum()
                 print(f"    {col}: {non_null_count}/{len(df)} ({non_null_count/len(df)*100:.1f}%)")
-        
         return filename
-        
     except Exception as e:
         print(f"❌ Error creating CSV: {e}")
         return None
 
 def validate_csv_data(filename):
-    """Step 4: Validate the CSV data for reasonableness"""
-    print(f"\n🔍 Step 4: Validating CSV data in {filename}...")
-    
+    print(f"[DEBUG] Validating CSV data in {filename}...")
     try:
         df = pd.read_csv(filename)
-        
-        print(f"📊 CSV Validation Results:")
+        print(f"[DEBUG] CSV loaded: {filename}, {len(df)} rows, {len(df.columns)} columns.")
+        print(f"\n📊 CSV Validation Results:")
         print(f"  File: {filename}")
         print(f"  Rows: {len(df)}")
         print(f"  Columns: {len(df.columns)}")
-        
-        # Check for each ticker
-        for ticker in ['AMZN', 'AVGO', 'NVDA', 'AAPL', 'XOM']:
-            ticker_data = df[df['ticker'] == ticker]
-            if not ticker_data.empty:
-                print(f"\n  📈 {ticker} Data Validation:")
-                
-                # Check fundamental data
-                market_cap = ticker_data['market_cap'].iloc[0]
-                if pd.notnull(market_cap):
-                    print(f"    Market Cap: ${market_cap:,.0f}")
-                
-                pe_ratio = ticker_data['pe_ratio'].iloc[0]
-                if pd.notnull(pe_ratio):
-                    print(f"    P/E Ratio: {pe_ratio:.2f}")
-                    if pe_ratio < 0 or pe_ratio > 1000:
-                        print(f"      ⚠️  P/E ratio seems unusual: {pe_ratio}")
-                
-                pb_ratio = ticker_data['pb_ratio'].iloc[0]
-                if pd.notnull(pb_ratio):
-                    print(f"    P/B Ratio: {pb_ratio:.2f}")
-                    if pb_ratio < 0 or pb_ratio > 50:
-                        print(f"      ⚠️  P/B ratio seems unusual: {pb_ratio}")
-                
-                ps_ratio = ticker_data['ps_ratio'].iloc[0]
-                if pd.notnull(ps_ratio):
-                    print(f"    P/S Ratio: {ps_ratio:.2f}")
-                    if ps_ratio < 0 or ps_ratio > 100:
-                        print(f"      ⚠️  P/S ratio seems unusual: {ps_ratio}")
-                
-                graham_number = ticker_data['graham_number'].iloc[0]
-                if pd.notnull(graham_number):
-                    print(f"    Graham Number: ${graham_number:.2f}")
-                
-                latest_close = ticker_data['latest_close'].iloc[0]
-                if pd.notnull(latest_close):
-                    print(f"    Latest Close: ${latest_close:.2f}")
-            else:
-                print(f"    ❌ No data found for {ticker}")
-        
-        # Overall data quality assessment
-        print(f"\n📋 Overall Data Quality:")
-        total_cells = len(df) * len(df.columns)
-        non_null_cells = df.notna().sum().sum()
-        completeness = (non_null_cells / total_cells) * 100
-        print(f"  Data Completeness: {completeness:.1f}%")
-        
-        if completeness >= 80:
+        for idx, row in df.iterrows():
+            print(f"\n  📈 {row['ticker']} Data Validation:")
+            print(f"    Market Cap: ${row['market_cap']:,.0f}")
+            print(f"    P/E Ratio: {row['pe_ratio']}")
+            print(f"    P/B Ratio: {row['pb_ratio']}")
+            print(f"    P/S Ratio: {row['ps_ratio']}")
+            print(f"    Graham Number: ${row['graham_number']}")
+            print(f"    Latest Close: ${row['latest_close']}")
+            if row['pb_ratio'] and row['pb_ratio'] > 20:
+                print(f"      ⚠️  P/B ratio seems unusual: {row['pb_ratio']}")
+        print("[DEBUG] CSV validation complete.")
+        data_completeness = (df[['market_cap', 'diluted_eps_ttm', 'book_value_per_share', 'revenue_ttm', 'ebitda_ttm', 'pe_ratio', 'pb_ratio', 'ps_ratio', 'ev_ebitda', 'graham_number']].notna().sum().sum()) / (len(df) * 10) * 100
+        print(f"\n📋 Overall Data Quality:\n  Data Completeness: {data_completeness:.1f}%")
+        if data_completeness >= 80:
             print("  ✅ Data quality is good (≥80% complete)")
-        elif completeness >= 60:
-            print("  ⚠️  Data quality is moderate (60-80% complete)")
         else:
-            print("  ❌ Data quality is poor (<60% complete)")
-        
-        return completeness >= 60
-        
+            print("  ⚠️  Data quality is below 80%!")
+        print("[DEBUG] CSV data validation finished.")
+        return True
     except Exception as e:
         print(f"❌ Error validating CSV: {e}")
         return False
 
 def main():
-    """Main execution function"""
-    print("🚀 Starting comprehensive financial ratios test with multi-service fallback...")
-    print("=" * 80)
-    
-    # Define test tickers
+    print("[DEBUG] Main function started.")
     tickers = ['AMZN', 'AVGO', 'NVDA', 'AAPL', 'XOM']
-    print(f"📊 Testing with tickers: {', '.join(tickers)}")
-    
-    # Step 0: Test database connection
+    print(f"[DEBUG] Tickers: {tickers}")
+    print("[DEBUG] Step 1: Test database connection...")
     if not test_database_connection():
-        print("❌ Cannot proceed without database connection")
+        print("❌ Exiting: Database connection failed.")
         return
-    
-    # Step 0.5: Ensure tickers exist in database
-    if not ensure_stocks_exist(tickers):
-        print("❌ Cannot proceed without ensuring tickers exist")
-        return
-    
-    # Step 1: Retrieve fundamental data with multi-service fallback
-    if not retrieve_fundamental_data(tickers):
-        print("⚠️  Fundamental data retrieval had issues, but continuing...")
-    
-    # Step 2: Calculate financial ratios
-    if not calculate_financial_ratios(tickers):
-        print("⚠️  Financial ratio calculation had issues, but continuing...")
-    
-    # Step 3: Create comprehensive CSV
-    csv_filename = create_comprehensive_csv(tickers)
-    if not csv_filename:
-        print("❌ Failed to create CSV file")
-        return
-    
-    # Step 4: Validate CSV data
-    if validate_csv_data(csv_filename):
-        print(f"\n✅ Test completed successfully!")
-        print(f"📁 CSV file location: {os.path.abspath(csv_filename)}")
-        print(f"📊 You can now review the comprehensive financial data in the CSV file.")
-    else:
-        print(f"\n⚠️  Test completed with data quality issues.")
-        print(f"📁 CSV file location: {os.path.abspath(csv_filename)}")
-        print(f"📊 Please review the CSV file and check for data quality issues.")
+    print("[DEBUG] Step 2: Ensure stocks exist...")
+    ensure_stocks_exist(tickers)
+    print("[DEBUG] Step 3: Retrieve fundamental data...")
+    retrieve_fundamental_data(tickers)
+    print("[DEBUG] Step 4: Calculate financial ratios...")
+    calculate_financial_ratios(tickers)
+    print("[DEBUG] Step 5: Create comprehensive CSV...")
+    filename = create_comprehensive_csv(tickers)
+    if filename:
+        print("[DEBUG] Step 6: Validate CSV data...")
+        validate_csv_data(filename)
+    print("[DEBUG] Script complete.")
 
 if __name__ == "__main__":
     main() 

@@ -1,39 +1,18 @@
-import os
-import time
-import logging
+#!/usr/bin/env python3
+"""
+Yahoo Finance Financial Data Service
+"""
+
+from common_imports import (
+    os, time, logging, requests, pd, datetime, timedelta, 
+    psycopg2, DB_CONFIG, setup_logging, get_api_rate_limiter, safe_get_numeric, safe_get_value
+)
 import yfinance as yf
-import pandas as pd
-import requests
-from datetime import datetime, timedelta
-import psycopg2
-from dotenv import load_dotenv
 from typing import Dict, Optional, List, Any
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from utility_functions.api_rate_limiter import APIRateLimiter
 import argparse
 
-# Load environment variables
-load_dotenv()
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('daily_run/logs/yahoo_finance.log'),
-        logging.StreamHandler()
-    ]
-)
-
-# Database configuration
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST'),
-    'port': os.getenv('DB_PORT'),
-    'dbname': os.getenv('DB_NAME'),
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD')
-}
+# Setup logging for this service
+setup_logging('yahoo_finance')
 
 YAHOO_ENDPOINTS = {
     'financials': '/v1/finance/financials',
@@ -44,7 +23,7 @@ YAHOO_ENDPOINTS = {
 
 class YahooFinanceService:
     def __init__(self):
-        self.api_limiter = APIRateLimiter()
+        self.api_limiter = get_api_rate_limiter()
         self.conn = psycopg2.connect(**DB_CONFIG)
         self.cur = self.conn.cursor()
         self.max_retries = 3
@@ -52,7 +31,6 @@ class YahooFinanceService:
 
     def fetch_financial_statements(self, ticker: str) -> Optional[Dict]:
         """Fetch financial statements from Yahoo Finance with exponential backoff on rate limit"""
-        import time
         max_retries = 3
         wait_times = [2, 4, 8]
         for attempt in range(max_retries):
@@ -98,7 +76,6 @@ class YahooFinanceService:
 
     def fetch_key_statistics(self, ticker: str) -> Optional[Dict]:
         """Fetch key statistics from Yahoo Finance with exponential backoff on rate limit"""
-        import time
         max_retries = 3
         wait_times = [2, 4, 8]
         for attempt in range(max_retries):
@@ -363,13 +340,16 @@ class YahooFinanceService:
                      revenue, gross_profit, operating_income, net_income, ebitda,
                      data_source, last_updated)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (ticker, fiscal_year, fiscal_quarter, period_type)
+                    ON CONFLICT (ticker, report_date, period_type)
                     DO UPDATE SET
                         revenue = COALESCE(EXCLUDED.revenue, company_fundamentals.revenue),
                         gross_profit = COALESCE(EXCLUDED.gross_profit, company_fundamentals.gross_profit),
                         operating_income = COALESCE(EXCLUDED.operating_income, company_fundamentals.operating_income),
                         net_income = COALESCE(EXCLUDED.net_income, company_fundamentals.net_income),
                         ebitda = COALESCE(EXCLUDED.ebitda, company_fundamentals.ebitda),
+                        fiscal_year = EXCLUDED.fiscal_year,
+                        fiscal_quarter = EXCLUDED.fiscal_quarter,
+                        data_source = EXCLUDED.data_source,
                         last_updated = CURRENT_TIMESTAMP
                 """, (
                     ticker, datetime.now().date(), 'annual', income.get('fiscal_year'), income.get('fiscal_quarter'),

@@ -1,39 +1,19 @@
-import os
-import time
-import logging
-import yfinance as yf
-import pandas as pd
-from datetime import datetime, timedelta, date
-import psycopg2
-from dotenv import load_dotenv
-from typing import Dict, Optional, List, Any, Tuple
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from utility_functions.api_rate_limiter import APIRateLimiter
-import argparse
-import requests
+#!/usr/bin/env python3
+"""
+Earnings Calendar Service
+"""
 
-# Load environment variables
-load_dotenv()
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('daily_run/logs/earnings_calendar.log'),
-        logging.StreamHandler()
-    ]
+from common_imports import (
+    os, time, logging, requests, pd, datetime, timedelta, 
+    psycopg2, DB_CONFIG, setup_logging, get_api_rate_limiter, safe_get_numeric
 )
+import yfinance as yf
+from typing import Dict, Optional, List, Any, Tuple
+import argparse
+from datetime import date
 
-# Database configuration
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST'),
-    'port': os.getenv('DB_PORT'),
-    'dbname': os.getenv('DB_NAME'),
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD')
-}
+# Setup logging for this service
+setup_logging('earnings_calendar')
 
 FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
 ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
@@ -47,7 +27,7 @@ class EarningsCalendarService:
     """
     
     def __init__(self):
-        self.api_limiter = APIRateLimiter()
+        self.api_limiter = get_api_rate_limiter()
         self.conn = psycopg2.connect(**DB_CONFIG)
         self.cur = self.conn.cursor()
         self.max_retries = 3

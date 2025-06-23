@@ -3,30 +3,14 @@
 Financial Modeling Prep (FMP) Service for fundamental data
 """
 
-import os
-import psycopg2
-import logging
-import requests
-import time
-from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
+from common_imports import (
+    os, time, logging, requests, pd, datetime, timedelta, 
+    psycopg2, DB_CONFIG, setup_logging, get_api_rate_limiter, safe_get_numeric
+)
+from typing import Dict, Optional, List, Any
 
-# Add parent directory to path for imports
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-
-# Load environment variables
-load_dotenv()
-
-# Database configuration
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST'),
-    'port': os.getenv('DB_PORT'),
-    'dbname': os.getenv('DB_NAME'),
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD')
-}
+# Setup logging for this service
+setup_logging('fmp')
 
 # API configuration
 FMP_API_KEY = os.getenv('FMP_API_KEY')
@@ -37,13 +21,7 @@ class FMPService:
     
     def __init__(self):
         """Initialize database connection and API rate limiter"""
-        self.api_limiter = None
-        try:
-            from utility_functions.api_rate_limiter import APIRateLimiter
-            self.api_limiter = APIRateLimiter()
-        except ImportError:
-            logging.warning("API rate limiter not available")
-        
+        self.api_limiter = get_api_rate_limiter()
         self.conn = psycopg2.connect(**DB_CONFIG)
         self.cur = self.conn.cursor()
         self.max_retries = 3

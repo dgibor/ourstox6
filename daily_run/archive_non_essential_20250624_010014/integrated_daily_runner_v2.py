@@ -66,24 +66,36 @@ class MultiServicePriceCollector:
                 
                 # Get price data from service - use the correct method
                 if service_name == 'yahoo':
-                    result = service.get_current_price(ticker)
-                    if result:
+                    # Yahoo service doesn't have get_current_price, use yfinance directly
+                    import yfinance as yf
+                    stock = yf.Ticker(ticker)
+                    info = stock.info
+                    
+                    if info and info.get('currentPrice'):
                         return {
                             'data': {
-                                'current_price': result.get('current_price', 0),
-                                'volume': result.get('volume', 0),
-                                'high': result.get('high', result.get('current_price', 0)),
-                                'low': result.get('low', result.get('current_price', 0)),
-                                'open': result.get('open', result.get('current_price', 0))
+                                'current_price': info.get('currentPrice', 0),
+                                'volume': info.get('volume', 0),
+                                'high': info.get('dayHigh', info.get('currentPrice', 0)),
+                                'low': info.get('dayLow', info.get('currentPrice', 0)),
+                                'open': info.get('open', info.get('currentPrice', 0))
                             },
                             'source': service_name,
                             'timestamp': datetime.now()
                         }
                 elif service_name == 'fmp':
-                    result = service.get_price_data(ticker)
-                    if result and result.get('current_price'):
+                    # FMP service doesn't have get_price_data, use the correct method
+                    result = service.get_fundamental_data(ticker)
+                    if result and result.get('key_stats', {}).get('market_data', {}).get('current_price'):
+                        market_data = result['key_stats']['market_data']
                         return {
-                            'data': result,
+                            'data': {
+                                'current_price': market_data.get('current_price', 0),
+                                'volume': market_data.get('volume', 0),
+                                'high': market_data.get('high', market_data.get('current_price', 0)),
+                                'low': market_data.get('low', market_data.get('current_price', 0)),
+                                'open': market_data.get('open', market_data.get('current_price', 0))
+                            },
                             'source': service_name,
                             'timestamp': datetime.now()
                         }
@@ -117,11 +129,11 @@ class MultiServicePriceCollector:
                     price_data = result['data']
                     self.store_price_data(ticker, price_data, result['source'])
                     successful += 1
-                    logging.info(f"[{i}/{len(tickers)}] ✅ Updated {ticker} from {result['source']}")
+                    logging.info(f"[{i}/{len(tickers)}] SUCCESS: Updated {ticker} from {result['source']}")
                 else:
                     failed += 1
                     errors.append(f"{ticker}: No data available")
-                    logging.warning(f"[{i}/{len(tickers)}] ❌ Failed {ticker}")
+                    logging.warning(f"[{i}/{len(tickers)}] FAILED: {ticker}")
                 
                 # Rate limiting
                 if i < len(tickers):
@@ -131,7 +143,7 @@ class MultiServicePriceCollector:
                 failed += 1
                 error_msg = f"{ticker}: {str(e)}"
                 errors.append(error_msg)
-                logging.error(f"[{i}/{len(tickers)}] ❌ Error {ticker}: {e}")
+                logging.error(f"[{i}/{len(tickers)}] ERROR: {ticker}: {e}")
         
         return {
             'total_tickers': len(tickers),
@@ -148,36 +160,36 @@ class MultiServicePriceCollector:
             current_price = price_data.get('current_price', 0)
             volume = price_data.get('volume', 0)
             
-            # Update stocks table
+            # Only insert into daily_charts table - stocks table doesn't have price columns
             query = """
-            UPDATE stocks 
-            SET close = %s, volume = %s, updated_at = NOW()
-            WHERE ticker = %s
-            """
-            self.db.execute_update(query, (int(current_price * 100), volume, ticker))
-            
-            # Insert into daily_charts table
-            query2 = """
-            INSERT INTO daily_charts (ticker, date, open, high, low, close, volume, created_at)
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s, NOW())
+            INSERT INTO daily_charts (ticker, date, open, high, low, close, volume)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (ticker, date) DO UPDATE SET
+                open = EXCLUDED.open,
+                high = EXCLUDED.high,
+                low = EXCLUDED.low,
                 close = EXCLUDED.close,
-                volume = EXCLUDED.volume,
-                updated_at = NOW()
+                volume = EXCLUDED.volume
             """
+            
+            from datetime import date
+            current_date = date.today().strftime('%Y-%m-%d')
             
             high = price_data.get('high', current_price)
             low = price_data.get('low', current_price)
             open_price = price_data.get('open', current_price)
             
-            self.db.execute_update(query2, (
-                ticker, 
+            self.db.execute_update(query, (
+                ticker,
+                current_date,
                 int(open_price * 100), 
                 int(high * 100), 
                 int(low * 100), 
                 int(current_price * 100), 
                 volume
             ))
+            
+            logging.info(f"Successfully stored price data for {ticker} in daily_charts table")
             
         except Exception as e:
             logging.error(f"Error storing price data for {ticker}: {e}")
@@ -234,7 +246,7 @@ class MultiServiceFundamentalsCollector:
     
     def get_fundamental_data(self, ticker: str) -> Dict:
         """Get fundamental data with fallback logic"""
-        service_order = ['yahoo', 'alphavantage', 'finnhub', 'fmp']
+        service_order = ['yahoo', 'fmp', 'alphavantage', 'finnhub']
         
         for service_name in service_order:
             if service_name not in self.services:
@@ -244,18 +256,26 @@ class MultiServiceFundamentalsCollector:
                 logging.info(f"Trying {service_name} for {ticker} fundamental data")
                 service = self.services[service_name]
                 
-                # Get fundamental data from service
-                result = service.get_fundamental_data(ticker)
+                # Get fundamental data from service - use the correct method
+                if service_name == 'yahoo':
+                    result = service.get_fundamental_data(ticker)
+                elif service_name == 'fmp':
+                    result = service.get_fundamental_data(ticker)
+                elif service_name == 'alphavantage':
+                    result = service.get_fundamental_data(ticker)
+                elif service_name == 'finnhub':
+                    result = service.get_fundamental_data(ticker)
+                else:
+                    result = None
                 
                 if result:
-                    logging.info(f"Successfully got fundamental data from {service_name} for {ticker}")
                     return {
                         'data': result,
                         'source': service_name,
                         'timestamp': datetime.now()
                     }
-                else:
-                    logging.warning(f"No fundamental data from {service_name} for {ticker}")
+                
+                logging.warning(f"No fundamental data from {service_name} for {ticker}")
                     
             except Exception as e:
                 logging.error(f"Error with {service_name} for {ticker}: {e}")
@@ -284,11 +304,11 @@ class MultiServiceFundamentalsCollector:
                     fundamental_data = result['data']
                     self.store_fundamental_data(ticker, fundamental_data, result['source'])
                     successful += 1
-                    logging.info(f"[{i}/{len(tickers)}] ✅ Updated {ticker} fundamentals from {result['source']}")
+                    logging.info(f"[{i}/{len(tickers)}] SUCCESS: Updated {ticker} from {result['source']}")
                 else:
                     failed += 1
                     errors.append(f"{ticker}: No fundamental data available")
-                    logging.warning(f"[{i}/{len(tickers)}] ❌ Failed {ticker} fundamentals")
+                    logging.warning(f"[{i}/{len(tickers)}] FAILED: {ticker}")
                 
                 # Rate limiting
                 if i < len(tickers):
@@ -298,7 +318,7 @@ class MultiServiceFundamentalsCollector:
                 failed += 1
                 error_msg = f"{ticker}: {str(e)}"
                 errors.append(error_msg)
-                logging.error(f"[{i}/{len(tickers)}] ❌ Error {ticker} fundamentals: {e}")
+                logging.error(f"[{i}/{len(tickers)}] ERROR: {ticker}: {e}")
         
         return {
             'total_tickers': len(tickers),
@@ -312,9 +332,21 @@ class MultiServiceFundamentalsCollector:
         try:
             self.db.connect()
             
-            # Extract data from fundamental_data
-            financial_data = fundamental_data.get('financial_data', {})
-            key_stats = fundamental_data.get('key_stats', {})
+            # Handle different data structures from different services
+            if source == 'yahoo':
+                # Yahoo service returns data directly
+                financial_data = fundamental_data.get('financial_data', {})
+                key_stats = fundamental_data.get('key_stats', {})
+            else:
+                # Other services return data in a different structure
+                financial_data = fundamental_data
+                key_stats = fundamental_data
+            
+            # Extract values with safe defaults
+            income_stmt = financial_data.get('income_statement', {}) if financial_data else {}
+            balance_sheet = financial_data.get('balance_sheet', {}) if financial_data else {}
+            market_data = key_stats.get('market_data', {}) if key_stats else {}
+            per_share = key_stats.get('per_share_metrics', {}) if key_stats else {}
             
             # Update stocks table with fundamental data
             query = """
@@ -335,14 +367,9 @@ class MultiServiceFundamentalsCollector:
                 operating_income = %s,
                 free_cash_flow = %s,
                 enterprise_value = %s,
-                updated_at = NOW()
+                fundamentals_last_update = NOW()
             WHERE ticker = %s
             """
-            
-            # Extract values with defaults
-            income_stmt = financial_data.get('income_statement', {})
-            balance_sheet = financial_data.get('balance_sheet', {})
-            market_data = key_stats.get('market_data', {})
             
             self.db.execute_update(query, (
                 market_data.get('market_cap'),
@@ -353,16 +380,18 @@ class MultiServiceFundamentalsCollector:
                 balance_sheet.get('total_debt'),
                 balance_sheet.get('total_equity'),
                 balance_sheet.get('cash_and_equivalents'),
-                key_stats.get('per_share_metrics', {}).get('diluted_eps_ttm'),
-                key_stats.get('per_share_metrics', {}).get('book_value_per_share'),
+                per_share.get('eps_diluted'),
+                per_share.get('book_value_per_share'),
                 balance_sheet.get('total_assets'),
                 balance_sheet.get('current_assets'),
                 balance_sheet.get('current_liabilities'),
                 income_stmt.get('operating_income'),
-                financial_data.get('cash_flow', {}).get('free_cash_flow'),
+                financial_data.get('cash_flow', {}).get('free_cash_flow') if financial_data else None,
                 market_data.get('enterprise_value'),
                 ticker
             ))
+            
+            logging.info(f"Successfully stored fundamental data for {ticker} from {source}")
             
         except Exception as e:
             logging.error(f"Error storing fundamental data for {ticker}: {e}")
@@ -467,7 +496,10 @@ class TechnicalIndicatorsCalculator:
         if len(prices) < period:
             return None
         
-        recent_prices = [p['close'] for p in prices[-period:]]
+        recent_prices = [p['close'] for p in prices[-period:] if p['close'] is not None]
+        if len(recent_prices) < period:
+            return None
+        
         return sum(recent_prices) / len(recent_prices)
     
     def calculate_ema(self, prices: List[Dict], period: int) -> float:
@@ -475,10 +507,15 @@ class TechnicalIndicatorsCalculator:
         if len(prices) < period:
             return None
         
-        multiplier = 2 / (period + 1)
-        ema = prices[0]['close']
+        # Filter out None values
+        valid_prices = [p for p in prices if p['close'] is not None]
+        if len(valid_prices) < period:
+            return None
         
-        for price in prices[1:]:
+        multiplier = 2 / (period + 1)
+        ema = valid_prices[0]['close']
+        
+        for price in valid_prices[1:]:
             ema = (price['close'] * multiplier) + (ema * (1 - multiplier))
         
         return ema
@@ -488,11 +525,16 @@ class TechnicalIndicatorsCalculator:
         if len(prices) < period + 1:
             return None
         
+        # Filter out None values
+        valid_prices = [p for p in prices if p['close'] is not None]
+        if len(valid_prices) < period + 1:
+            return None
+        
         gains = []
         losses = []
         
-        for i in range(1, len(prices)):
-            change = prices[i]['close'] - prices[i-1]['close']
+        for i in range(1, len(valid_prices)):
+            change = valid_prices[i]['close'] - valid_prices[i-1]['close']
             if change > 0:
                 gains.append(change)
                 losses.append(0)
@@ -550,7 +592,10 @@ class TechnicalIndicatorsCalculator:
         if sma is None:
             return {'bb_upper': None, 'bb_middle': None, 'bb_lower': None}
         
-        recent_prices = [p['close'] for p in prices[-period:]]
+        recent_prices = [p['close'] for p in prices[-period:] if p['close'] is not None]
+        if len(recent_prices) < period:
+            return {'bb_upper': None, 'bb_middle': None, 'bb_lower': None}
+        
         variance = sum((price - sma) ** 2 for price in recent_prices) / period
         std_dev = variance ** 0.5
         
@@ -565,7 +610,10 @@ class TechnicalIndicatorsCalculator:
         if len(prices) < period:
             return None
         
-        recent_volumes = [p['volume'] for p in prices[-period:]]
+        recent_volumes = [p['volume'] for p in prices[-period:] if p['volume'] is not None]
+        if len(recent_volumes) < period:
+            return None
+        
         return sum(recent_volumes) / len(recent_volumes)
     
     def store_indicators(self, ticker: str, indicators: Dict):
@@ -799,12 +847,12 @@ class IntegratedDailyRunnerV2:
                 
                 if result and 'error' not in result:
                     successful += 1
-                    logging.info(f"[{i}/{len(tickers)}] ✅ Calculated indicators for {ticker}")
+                    logging.info(f"[{i}/{len(tickers)}] SUCCESS: Calculated indicators for {ticker}")
                 else:
                     failed += 1
-                    error_msg = f"{ticker}: {result.get('error', 'Unknown error')}"
+                    error_msg = f"{ticker}: No data available"
                     errors.append(error_msg)
-                    logging.warning(f"[{i}/{len(tickers)}] ❌ Failed indicators for {ticker}")
+                    logging.warning(f"[{i}/{len(tickers)}] FAILED: {ticker}")
                 
                 # Rate limiting
                 if i < len(tickers):
@@ -814,7 +862,7 @@ class IntegratedDailyRunnerV2:
                 failed += 1
                 error_msg = f"{ticker}: {str(e)}"
                 errors.append(error_msg)
-                logging.error(f"[{i}/{len(tickers)}] ❌ Error calculating indicators for {ticker}: {e}")
+                logging.error(f"[{i}/{len(tickers)}] ERROR: {ticker}: {e}")
         
         return {
             'total_tickers': len(tickers),
@@ -843,14 +891,14 @@ def main():
         print(f"\nPipeline Result: {result['overall_status']}")
         
         if result['overall_status'] == 'success':
-            print("✅ Pipeline completed successfully!")
+            print("SUCCESS: Pipeline completed successfully!")
         else:
-            print("❌ Pipeline failed!")
+            print("FAILED: Pipeline failed!")
             
     except KeyboardInterrupt:
-        print("\n⚠️ Pipeline interrupted by user")
+        print("\nWARNING: Pipeline interrupted by user")
     except Exception as e:
-        print(f"\n❌ Pipeline failed: {e}")
+        print(f"\nFAILED: Pipeline failed: {e}")
 
 if __name__ == "__main__":
     main() 

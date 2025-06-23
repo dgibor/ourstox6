@@ -67,14 +67,20 @@ class Config:
     def validate_config(cls) -> bool:
         """Validate that all required configuration is present"""
         required_env_vars = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD']
+        required_api_keys = ['FINNHUB_API_KEY', 'ALPHA_VANTAGE_API_KEY', 'FMP_API_KEY']
+        all_ok = True
         
         for var in required_env_vars:
             if not os.getenv(var):
                 print(f"❌ Missing required environment variable: {var}")
-                return False
-        
-        print("✅ Configuration validation passed")
-        return True
+                all_ok = False
+        for key in required_api_keys:
+            if not os.getenv(key):
+                print(f"❌ Missing required API key: {key}")
+                all_ok = False
+        if all_ok:
+            print("✅ Configuration validation passed")
+        return all_ok
 
 def test_config():
     """Test configuration loading and validation"""

@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
 from config import Config
 from exceptions import DatabaseError
+from datetime import date
 
 class DatabaseManager:
     """Centralized database connection manager"""
@@ -98,7 +99,7 @@ class DatabaseManager:
         # Price data should always go to daily_charts table
         query = """
             INSERT INTO daily_charts (ticker, date, open, high, low, close, volume)
-            VALUES (%s, CURRENT_DATE, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (ticker, date) DO UPDATE SET
                 open = EXCLUDED.open,
                 high = EXCLUDED.high,
@@ -106,8 +107,11 @@ class DatabaseManager:
                 close = EXCLUDED.close,
                 volume = EXCLUDED.volume
         """
+        current_date = date.today().strftime('%Y-%m-%d')
+        
         params = (
             ticker,
+            current_date,
             price_data.get('open'),
             price_data.get('high'),
             price_data.get('low'),
