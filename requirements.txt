@@ -9,4 +9,5 @@ fastapi
 uvicorn[standard]
 pytz
 pandas-market-calendars 
-pydantic 
+pydantic
+psutil 
