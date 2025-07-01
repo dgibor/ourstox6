@@ -80,13 +80,25 @@ class DailyTradingSystem:
             trading_day_result = self._check_trading_day(force_run)
             
             if not trading_day_result['was_trading_day'] and not force_run:
-                logger.info("📈 Market was closed today - running historical data population only")
+                logger.info("📈 Market was closed today - running comprehensive data population")
+                
+                # On non-trading days, use full API limits for data population
+                self.max_api_calls_per_day = 1000  # Full daily limit
+                self.api_calls_used = 0
+                
+                # Step 1: Populate historical data (priority 1)
                 historical_result = self._populate_historical_data()
+                
+                # Step 2: Update fundamentals for tickers needing updates (priority 2)
+                fundamental_result = self._update_fundamentals_non_trading_day()
+                
+                # Step 3: Remove delisted stocks
                 delisted_result = self._remove_delisted_stocks()
                 
                 return self._compile_results({
                     'trading_day_check': trading_day_result,
                     'historical_data': historical_result,
+                    'fundamentals_update': fundamental_result,
                     'delisted_removal': delisted_result
                 })
             
@@ -592,6 +604,142 @@ class DailyTradingSystem:
         except Exception as e:
             logger.error(f"Error storing historical data for {ticker}: {e}")
     
+    def _update_fundamentals_non_trading_day(self) -> Dict:
+        """
+        Update fundamentals for tickers that need updates on non-trading days.
+        Uses remaining API calls after historical data population.
+        """
+        logger.info("📊 Updating fundamentals on non-trading day")
+        
+        try:
+            start_time = time.time()
+            
+            # Calculate remaining API calls
+            remaining_calls = self.max_api_calls_per_day - self.api_calls_used
+            logger.info(f"Remaining API calls for fundamentals: {remaining_calls}")
+            
+            if remaining_calls <= 0:
+                logger.warning("No API calls remaining for fundamental updates")
+                return {
+                    'phase': 'fundamentals_update_non_trading',
+                    'status': 'skipped',
+                    'reason': 'no_api_calls_remaining',
+                    'api_calls_used': 0
+                }
+            
+            # Get tickers needing fundamental updates
+            tickers_needing_fundamentals = self._get_tickers_needing_fundamental_updates()
+            logger.info(f"Found {len(tickers_needing_fundamentals)} tickers needing fundamental updates")
+            
+            # Prioritize tickers with oldest fundamental data
+            prioritized_tickers = self._prioritize_fundamental_tickers(tickers_needing_fundamentals)
+            
+            # Process fundamental updates within API limit
+            successful_updates = 0
+            api_calls_used = 0
+            
+            for ticker in prioritized_tickers:
+                if api_calls_used >= remaining_calls:
+                    logger.info(f"API call limit reached after {api_calls_used} calls")
+                    break
+                
+                try:
+                    # Update fundamental data (1 API call per ticker)
+                    fundamental_result = self.earnings_processor._update_single_fundamental(ticker)
+                    if fundamental_result:
+                        successful_updates += 1
+                        api_calls_used += 1
+                    else:
+                        logger.warning(f"Failed to update fundamentals for {ticker}")
+                        
+                except Exception as e:
+                    logger.error(f"Error updating fundamentals for {ticker}: {e}")
+            
+            processing_time = time.time() - start_time
+            self.api_calls_used += api_calls_used
+            
+            result = {
+                'phase': 'fundamentals_update_non_trading',
+                'total_tickers_available': len(prioritized_tickers),
+                'successful_updates': successful_updates,
+                'api_calls_used': api_calls_used,
+                'processing_time': processing_time
+            }
+            
+            logger.info(f"✅ Fundamentals updated on non-trading day: {successful_updates} tickers")
+            logger.info(f"📊 API calls used for fundamentals: {api_calls_used}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error updating fundamentals on non-trading day: {e}")
+            self.error_handler.handle_error(
+                "Non-trading day fundamental update failed", e, ErrorSeverity.MEDIUM
+            )
+            return {
+                'phase': 'fundamentals_update_non_trading',
+                'error': str(e),
+                'successful_updates': 0
+            }
+    
+    def _get_tickers_needing_fundamental_updates(self) -> List[str]:
+        """
+        Get tickers that need fundamental updates.
+        """
+        try:
+            # Get tickers with old or missing fundamental data
+            query = """
+            SELECT s.ticker FROM stocks s
+            LEFT JOIN company_fundamentals cf ON s.ticker = cf.ticker
+            WHERE s.is_active = true 
+            AND (
+                cf.ticker IS NULL 
+                OR cf.updated_at < NOW() - INTERVAL '30 days'
+                OR cf.revenue IS NULL
+                OR cf.net_income IS NULL
+            )
+            ORDER BY COALESCE(cf.updated_at, '1900-01-01'::timestamp)
+            """
+            results = self.db.execute_query(query)
+            return [row[0] for row in results]
+            
+        except Exception as e:
+            logger.error(f"Error getting tickers needing fundamental updates: {e}")
+            return []
+    
+    def _prioritize_fundamental_tickers(self, tickers: List[str]) -> List[str]:
+        """
+        Prioritize tickers based on fundamental data freshness.
+        """
+        try:
+            prioritized = []
+            
+            for ticker in tickers:
+                # Get last fundamental update date
+                query = """
+                SELECT updated_at FROM company_fundamentals 
+                WHERE ticker = %s 
+                ORDER BY updated_at DESC 
+                LIMIT 1
+                """
+                result = self.db.execute_query(query, (ticker,))
+                
+                if result:
+                    last_update = result[0][0]
+                    days_old = (datetime.now() - last_update).days
+                else:
+                    days_old = 999  # No data, prioritize highly
+                
+                prioritized.append((ticker, days_old))
+            
+            # Sort by days old (descending - oldest first)
+            prioritized.sort(key=lambda x: x[1], reverse=True)
+            return [ticker for ticker, days_old in prioritized]
+            
+        except Exception as e:
+            logger.error(f"Error prioritizing fundamental tickers: {e}")
+            return tickers
+    
     def _remove_delisted_stocks(self) -> Dict:
         """
         Remove delisted stocks from the database.
@@ -741,7 +889,10 @@ class DailyTradingSystem:
         summary = {
             'trading_day': phase_results.get('trading_day_check', {}).get('was_trading_day', False),
             'daily_prices_updated': phase_results.get('daily_prices', {}).get('successful_updates', 0),
-            'fundamentals_updated': phase_results.get('fundamentals_technicals', {}).get('fundamentals', {}).get('successful', 0),
+            'fundamentals_updated': (
+                phase_results.get('fundamentals_technicals', {}).get('fundamentals', {}).get('successful', 0) +
+                phase_results.get('fundamentals_update', {}).get('successful_updates', 0)
+            ),
             'technicals_calculated': phase_results.get('fundamentals_technicals', {}).get('technicals', {}).get('successful', 0),
             'historical_data_updated': phase_results.get('historical_data', {}).get('successful_updates', 0),
             'delisted_removed': phase_results.get('delisted_removal', {}).get('successfully_removed', 0)

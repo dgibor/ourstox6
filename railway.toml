@@ -5,7 +5,7 @@ buildCommand = "pip install -r requirements.txt"
 [deploy]
 runtime = "V2"
 numReplicas = 1
-cronSchedule = "5 22 * * MON-FRI"
+cronSchedule = "5 22 * * *"
 startCommand = "python daily_run/daily_trading_system.py"
 sleepApplication = false
 restartPolicyType = "NEVER"
