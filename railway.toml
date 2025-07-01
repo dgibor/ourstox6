@@ -5,7 +5,10 @@ buildCommand = "pip install -r requirements.txt"
 [deploy]
 runtime = "V2"
 numReplicas = 1
-cronSchedule = "5 22 * * *"
-startCommand = "python daily_run/daily_trading_system.py"
+startCommand = "uvicorn dashboard_api:app --host 0.0.0.0 --port $PORT"
 sleepApplication = false
 restartPolicyType = "NEVER"
+
+[[cron]]
+schedule = "5 22 * * *"
+command = "python daily_run/daily_trading_system.py"
