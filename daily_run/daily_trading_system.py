@@ -1,12 +1,25 @@
 """
 Daily Trading System
 
-Comprehensive system that runs daily after market close to:
-1. Check if it was a trading day
-2. Update daily_charts with batch price commands (100 stocks per call)
-3. Calculate fundamentals and technical indicators
-4. Populate historical data with remaining API calls
-5. Remove delisted stocks
+Comprehensive system that runs daily after market close following this priority schema:
+
+PRIORITY 1 (Most Important): 
+- If it was a trading day: Get price data for all stocks, update daily_charts, calculate technical indicators
+- If market was closed: Skip to Priority 2
+
+PRIORITY 2: 
+- Update fundamental information for companies with earnings announcements that day
+- Calculate fundamental ratios based on updated stock prices
+
+PRIORITY 3: 
+- Update historical prices until at least 100 days of data for every company
+- Uses remaining API calls after priorities 1 and 2
+
+PRIORITY 4: 
+- Fill missing fundamental data for companies
+- Uses any remaining API calls after priorities 1, 2, and 3
+
+The system respects API rate limits and prioritizes the most time-sensitive operations first.
 """
 
 import logging
@@ -80,6 +93,12 @@ class DailyTradingSystem:
         """
         Main entry point for daily trading process.
         
+        Follows the exact priority schema:
+        1. (Most important) Get price data for trading day, calculate technical indicators (if trading day)
+        2. Update fundamental information for companies with earnings announcements that day
+        3. Update historical prices until at least 100 days of data for every company
+        4. Fill missing fundamental data for companies
+        
         Args:
             force_run: Force run even if market was closed
             
@@ -87,57 +106,55 @@ class DailyTradingSystem:
             Dictionary with complete processing results
         """
         self.start_time = time.time()
-        logger.info("🚀 Starting Daily Trading System")
+        logger.info("🚀 Starting Daily Trading System - Priority-Based Schema")
         
         try:
-            # Step 1: Check if it was a trading day
+            # Check if it was a trading day
             trading_day_result = self._check_trading_day(force_run)
             
-            if not trading_day_result['was_trading_day'] and not force_run:
-                logger.info("📈 Market was closed today - running comprehensive data population")
+            # PRIORITY 1: Get price data for trading day, calculate technical indicators
+            if trading_day_result['was_trading_day'] or force_run:
+                logger.info("📈 PRIORITY 1: Processing trading day - updating prices and technical indicators")
                 
-                # On non-trading days, use full API limits for data population
-                self.max_api_calls_per_day = 1000  # Full daily limit
-                self.api_calls_used = 0
+                # Step 1a: Update daily prices for all stocks
+                price_result = self._update_daily_prices()
                 
-                # Step 1: Populate historical data (priority 1)
-                historical_result = self._populate_historical_data()
+                # Step 1b: Calculate technical indicators based on updated prices
+                technical_result = self._calculate_technical_indicators_priority1()
                 
-                # Step 2: Update fundamentals for tickers needing updates (priority 2)
-                fundamental_result = self._update_fundamentals_non_trading_day()
-                
-                # Step 3: Remove delisted stocks
-                delisted_result = self._remove_delisted_stocks()
-                
-                return self._compile_results({
-                    'trading_day_check': trading_day_result,
-                    'historical_data': historical_result,
-                    'fundamentals_update': fundamental_result,
-                    'delisted_removal': delisted_result
-                })
+                priority1_result = {
+                    'daily_prices': price_result,
+                    'technical_indicators': technical_result
+                }
+            else:
+                logger.info("📈 PRIORITY 1: Market was closed - skipping to Priority 2")
+                priority1_result = {
+                    'status': 'skipped',
+                    'reason': 'market_closed'
+                }
             
-            # Step 2: Update daily prices (only on trading days)
-            price_result = self._update_daily_prices()
+            # PRIORITY 2: Update fundamental information for companies with earnings announcements
+            logger.info("📊 PRIORITY 2: Updating fundamentals for companies with earnings announcements")
+            earnings_fundamentals_result = self._update_earnings_announcement_fundamentals()
             
-            # Step 3: Calculate fundamentals and technical indicators
-            fundamental_result = self._calculate_fundamentals_and_technicals()
+            # PRIORITY 3: Update historical prices until 100+ days for every company
+            logger.info("📚 PRIORITY 3: Updating historical prices (100+ days minimum)")
+            historical_result = self._ensure_minimum_historical_data()
             
-            # Step 4: Populate historical data with remaining API calls
-            historical_result = self._populate_historical_data()
-            
-            # Step 5: Remove delisted stocks
-            delisted_result = self._remove_delisted_stocks()
+            # PRIORITY 4: Fill missing fundamental data
+            logger.info("🔍 PRIORITY 4: Filling missing fundamental data")
+            missing_fundamentals_result = self._fill_missing_fundamental_data()
             
             # Compile final results
             results = self._compile_results({
                 'trading_day_check': trading_day_result,
-                'daily_prices': price_result,
-                'fundamentals_technicals': fundamental_result,
-                'historical_data': historical_result,
-                'delisted_removal': delisted_result
+                'priority_1_trading_day': priority1_result,
+                'priority_2_earnings_fundamentals': earnings_fundamentals_result,
+                'priority_3_historical_data': historical_result,
+                'priority_4_missing_fundamentals': missing_fundamentals_result
             })
             
-            logger.info("✅ Daily Trading System completed successfully")
+            logger.info("✅ Daily Trading System completed successfully - All priorities processed")
             return results
             
         except Exception as e:
@@ -292,6 +309,291 @@ class DailyTradingSystem:
                 'phase': 'fundamentals_and_technicals',
                 'error': str(e),
                 'successful_updates': 0
+            }
+
+    def _calculate_technical_indicators_priority1(self) -> Dict:
+        """
+        PRIORITY 1: Calculate technical indicators based on updated price data.
+        This is called immediately after price updates on trading days.
+        """
+        logger.info("📈 PRIORITY 1: Calculating technical indicators for all stocks")
+        
+        try:
+            start_time = time.time()
+            
+            # Get all active tickers (since we just updated prices for all)
+            tickers = self._get_active_tickers()
+            logger.info(f"Calculating technical indicators for {len(tickers)} tickers")
+            
+            # Calculate technical indicators for all tickers
+            technical_result = self._calculate_technical_indicators(tickers)
+            
+            processing_time = time.time() - start_time
+            
+            result = {
+                'phase': 'priority_1_technical_indicators',
+                'total_tickers': len(tickers),
+                'successful_calculations': technical_result.get('successful_calculations', 0),
+                'failed_calculations': technical_result.get('failed_calculations', 0),
+                'processing_time': processing_time
+            }
+            
+            logger.info(f"✅ PRIORITY 1: Technical indicators completed - {result['successful_calculations']}/{result['total_tickers']} successful")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in Priority 1 technical indicators: {e}")
+            self.error_handler.handle_error(
+                "Priority 1 technical indicators failed", e, ErrorSeverity.HIGH
+            )
+            return {
+                'phase': 'priority_1_technical_indicators',
+                'error': str(e),
+                'successful_calculations': 0,
+                'failed_calculations': 0
+            }
+
+    def _update_earnings_announcement_fundamentals(self) -> Dict:
+        """
+        PRIORITY 2: Update fundamental information for companies with earnings announcements that day.
+        Calculate fundamental ratios based on updated stock prices.
+        """
+        logger.info("📊 PRIORITY 2: Processing earnings announcements and fundamental updates")
+        
+        try:
+            start_time = time.time()
+            
+            # Get companies with earnings announcements today
+            earnings_tickers = self._get_earnings_announcement_tickers()
+            logger.info(f"Found {len(earnings_tickers)} companies with earnings announcements")
+            
+            if not earnings_tickers:
+                logger.info("No earnings announcements today - skipping fundamental updates")
+                return {
+                    'phase': 'priority_2_earnings_fundamentals',
+                    'status': 'skipped',
+                    'reason': 'no_earnings_announcements',
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Update fundamental data for earnings announcement companies
+            successful_updates = 0
+            failed_updates = 0
+            api_calls_used = 0
+            
+            for ticker in earnings_tickers:
+                if self.api_calls_used >= self.max_api_calls_per_day:
+                    logger.warning(f"API call limit reached after processing {successful_updates} earnings tickers")
+                    break
+                
+                try:
+                    # Update fundamental data
+                    fundamental_success = self._update_single_ticker_fundamentals(ticker)
+                    
+                    if fundamental_success:
+                        # Calculate fundamental ratios based on updated price
+                        self._calculate_fundamental_ratios(ticker)
+                        successful_updates += 1
+                        api_calls_used += 1
+                        logger.debug(f"Updated fundamentals and ratios for {ticker}")
+                    else:
+                        failed_updates += 1
+                        logger.warning(f"Failed to update fundamentals for {ticker}")
+                        
+                except Exception as e:
+                    logger.error(f"Error updating earnings fundamentals for {ticker}: {e}")
+                    failed_updates += 1
+            
+            self.api_calls_used += api_calls_used
+            processing_time = time.time() - start_time
+            
+            result = {
+                'phase': 'priority_2_earnings_fundamentals',
+                'earnings_announcements_found': len(earnings_tickers),
+                'successful_updates': successful_updates,
+                'failed_updates': failed_updates,
+                'api_calls_used': api_calls_used,
+                'processing_time': processing_time
+            }
+            
+            logger.info(f"✅ PRIORITY 2: Earnings fundamentals completed - {successful_updates}/{len(earnings_tickers)} successful")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in Priority 2 earnings fundamentals: {e}")
+            self.error_handler.handle_error(
+                "Priority 2 earnings fundamentals failed", e, ErrorSeverity.HIGH
+            )
+            return {
+                'phase': 'priority_2_earnings_fundamentals',
+                'error': str(e),
+                'successful_updates': 0,
+                'failed_updates': 0
+            }
+
+    def _ensure_minimum_historical_data(self) -> Dict:
+        """
+        PRIORITY 3: Update historical prices until at least 100 days of data for every company.
+        Uses remaining API calls after priorities 1 and 2.
+        """
+        logger.info("📚 PRIORITY 3: Ensuring minimum 100 days of historical data")
+        
+        try:
+            start_time = time.time()
+            
+            # Calculate remaining API calls
+            remaining_calls = self.max_api_calls_per_day - self.api_calls_used
+            logger.info(f"Remaining API calls for historical data: {remaining_calls}")
+            
+            if remaining_calls <= 0:
+                logger.warning("No API calls remaining for historical data")
+                return {
+                    'phase': 'priority_3_historical_data',
+                    'status': 'skipped',
+                    'reason': 'no_api_calls_remaining',
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Get tickers that need historical data to reach 100+ days
+            tickers_needing_history = self._get_tickers_needing_100_days_history()
+            logger.info(f"Found {len(tickers_needing_history)} tickers needing historical data")
+            
+            # Process historical data within API limit
+            successful_updates = 0
+            failed_updates = 0
+            api_calls_used = 0
+            
+            for ticker in tickers_needing_history:
+                if api_calls_used >= remaining_calls:
+                    logger.info(f"API call limit reached after {api_calls_used} calls")
+                    break
+                
+                try:
+                    # Get historical data to ensure 100+ days
+                    history_result = self._get_historical_data_to_minimum(ticker, min_days=100)
+                    if history_result['success']:
+                        successful_updates += 1
+                        api_calls_used += history_result['api_calls']
+                        logger.debug(f"Updated historical data for {ticker} - {history_result['days_added']} days added")
+                    else:
+                        failed_updates += 1
+                        logger.warning(f"Failed to get historical data for {ticker}")
+                        
+                except Exception as e:
+                    logger.error(f"Error getting historical data for {ticker}: {e}")
+                    failed_updates += 1
+            
+            self.api_calls_used += api_calls_used
+            processing_time = time.time() - start_time
+            
+            result = {
+                'phase': 'priority_3_historical_data',
+                'tickers_needing_history': len(tickers_needing_history),
+                'successful_updates': successful_updates,
+                'failed_updates': failed_updates,
+                'api_calls_used': api_calls_used,
+                'processing_time': processing_time
+            }
+            
+            logger.info(f"✅ PRIORITY 3: Historical data completed - {successful_updates} tickers updated")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in Priority 3 historical data: {e}")
+            self.error_handler.handle_error(
+                "Priority 3 historical data failed", e, ErrorSeverity.MEDIUM
+            )
+            return {
+                'phase': 'priority_3_historical_data',
+                'error': str(e),
+                'successful_updates': 0,
+                'failed_updates': 0
+            }
+
+    def _fill_missing_fundamental_data(self) -> Dict:
+        """
+        PRIORITY 4: Fill missing fundamental data for companies.
+        Uses any remaining API calls after priorities 1, 2, and 3.
+        """
+        logger.info("🔍 PRIORITY 4: Filling missing fundamental data")
+        
+        try:
+            start_time = time.time()
+            
+            # Calculate remaining API calls
+            remaining_calls = self.max_api_calls_per_day - self.api_calls_used
+            logger.info(f"Remaining API calls for missing fundamentals: {remaining_calls}")
+            
+            if remaining_calls <= 0:
+                logger.warning("No API calls remaining for missing fundamentals")
+                return {
+                    'phase': 'priority_4_missing_fundamentals',
+                    'status': 'skipped',
+                    'reason': 'no_api_calls_remaining',
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Get tickers with missing fundamental data
+            tickers_missing_fundamentals = self._get_tickers_missing_fundamental_data()
+            logger.info(f"Found {len(tickers_missing_fundamentals)} tickers with missing fundamental data")
+            
+            # Process missing fundamentals within API limit
+            successful_updates = 0
+            failed_updates = 0
+            api_calls_used = 0
+            
+            for ticker in tickers_missing_fundamentals:
+                if api_calls_used >= remaining_calls:
+                    logger.info(f"API call limit reached after {api_calls_used} calls")
+                    break
+                
+                try:
+                    # Fill missing fundamental data
+                    fundamental_success = self._update_single_ticker_fundamentals(ticker)
+                    
+                    if fundamental_success:
+                        # Calculate ratios for newly filled data
+                        self._calculate_fundamental_ratios(ticker)
+                        successful_updates += 1
+                        api_calls_used += 1
+                        logger.debug(f"Filled missing fundamentals for {ticker}")
+                    else:
+                        failed_updates += 1
+                        logger.warning(f"Failed to fill fundamentals for {ticker}")
+                        
+                except Exception as e:
+                    logger.error(f"Error filling fundamentals for {ticker}: {e}")
+                    failed_updates += 1
+            
+            self.api_calls_used += api_calls_used
+            processing_time = time.time() - start_time
+            
+            result = {
+                'phase': 'priority_4_missing_fundamentals',
+                'tickers_missing_data': len(tickers_missing_fundamentals),
+                'successful_updates': successful_updates,
+                'failed_updates': failed_updates,
+                'api_calls_used': api_calls_used,
+                'processing_time': processing_time
+            }
+            
+            logger.info(f"✅ PRIORITY 4: Missing fundamentals completed - {successful_updates} tickers updated")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in Priority 4 missing fundamentals: {e}")
+            self.error_handler.handle_error(
+                "Priority 4 missing fundamentals failed", e, ErrorSeverity.MEDIUM
+            )
+            return {
+                'phase': 'priority_4_missing_fundamentals',
+                'error': str(e),
+                'successful_updates': 0,
+                'failed_updates': 0
             }
 
     def _calculate_technical_indicators(self, tickers: List[str]) -> Dict:
@@ -832,6 +1134,278 @@ class DailyTradingSystem:
         except Exception as e:
             logger.error(f"Error getting tickers with recent prices: {e}")
             return []
+
+    def _get_earnings_announcement_tickers(self) -> List[str]:
+        """
+        Get tickers that have earnings announcements today.
+        This should check earnings calendar data.
+        """
+        try:
+            # First, try to get earnings announcements from earnings calendar
+            if hasattr(self, 'earnings_calendar') and self.earnings_calendar:
+                try:
+                    today = date.today().strftime('%Y-%m-%d')
+                    earnings_today = self.earnings_calendar.get_earnings_for_date(today)
+                    if earnings_today:
+                        return [ticker for ticker in earnings_today if ticker]
+                except Exception as e:
+                    logger.warning(f"Error getting earnings from calendar service: {e}")
+            
+            # Fallback: Check earnings_calendar table if it exists
+            try:
+                query = """
+                SELECT DISTINCT ticker 
+                FROM earnings_calendar 
+                WHERE earnings_date = CURRENT_DATE 
+                AND ticker IS NOT NULL
+                ORDER BY ticker
+                """
+                results = self.db.execute_query(query)
+                tickers = [row[0] for row in results]
+                if tickers:
+                    logger.info(f"Found {len(tickers)} earnings announcements in database")
+                    return tickers
+            except Exception as e:
+                logger.debug(f"No earnings_calendar table or error: {e}")
+            
+            # Final fallback: Return empty list (no earnings announcements)
+            logger.info("No earnings announcements found for today")
+            return []
+            
+        except Exception as e:
+            logger.error(f"Error getting earnings announcement tickers: {e}")
+            return []
+
+    def _get_tickers_needing_100_days_history(self) -> List[str]:
+        """
+        Get tickers that need historical data to reach at least 100 days.
+        """
+        try:
+            query = """
+            SELECT 
+                s.ticker,
+                COUNT(dc.date) as current_days
+            FROM stocks s
+            LEFT JOIN daily_charts dc ON s.ticker = dc.ticker
+            GROUP BY s.ticker
+            HAVING COUNT(dc.date) < 100
+            ORDER BY COUNT(dc.date) ASC, s.ticker
+            """
+            results = self.db.execute_query(query)
+            tickers = [row[0] for row in results]
+            logger.info(f"Found {len(tickers)} tickers needing more historical data")
+            return tickers
+        except Exception as e:
+            logger.error(f"Error getting tickers needing 100 days history: {e}")
+            return []
+
+    def _get_tickers_missing_fundamental_data(self) -> List[str]:
+        """
+        Get tickers that are missing fundamental data.
+        """
+        try:
+            query = """
+            SELECT DISTINCT s.ticker
+            FROM stocks s
+            LEFT JOIN company_fundamentals cf ON s.ticker = cf.ticker
+            WHERE cf.ticker IS NULL 
+               OR cf.revenue IS NULL 
+               OR cf.net_income IS NULL
+               OR cf.total_assets IS NULL
+            ORDER BY s.ticker
+            """
+            results = self.db.execute_query(query)
+            tickers = [row[0] for row in results]
+            logger.info(f"Found {len(tickers)} tickers missing fundamental data")
+            return tickers
+        except Exception as e:
+            logger.error(f"Error getting tickers missing fundamental data: {e}")
+            return []
+
+    def _get_historical_data_to_minimum(self, ticker: str, min_days: int = 100) -> Dict:
+        """
+        Get historical data for a ticker to ensure minimum days requirement.
+        """
+        try:
+            # Check current days available
+            current_days_query = """
+            SELECT COUNT(*) 
+            FROM daily_charts 
+            WHERE ticker = %s
+            """
+            current_result = self.db.execute_query(current_days_query, (ticker,))
+            current_days = current_result[0][0] if current_result else 0
+            
+            if current_days >= min_days:
+                return {
+                    'success': True,
+                    'api_calls': 0,
+                    'days_added': 0,
+                    'reason': 'sufficient_data_exists'
+                }
+            
+            # Calculate how many more days we need
+            days_needed = min_days - current_days + 50  # Add buffer
+            
+            # Use service factory to get historical data
+            service = self.service_manager.get_service('yahoo_finance')
+            historical_data = service.get_historical_data(ticker, days=days_needed)
+            
+            if historical_data:
+                # Store historical data
+                self._store_historical_data(ticker, historical_data)
+                return {
+                    'success': True,
+                    'api_calls': 1,
+                    'days_added': len(historical_data),
+                    'total_days_now': current_days + len(historical_data)
+                }
+            else:
+                return {
+                    'success': False,
+                    'api_calls': 1,
+                    'days_added': 0,
+                    'error': 'no_data_returned'
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting historical data to minimum for {ticker}: {e}")
+            return {
+                'success': False,
+                'api_calls': 1,
+                'days_added': 0,
+                'error': str(e)
+            }
+
+    def _update_single_ticker_fundamentals(self, ticker: str) -> bool:
+        """
+        Update fundamental data for a single ticker using multi-service approach.
+        """
+        try:
+            # Use the multi-service manager to get fundamental data
+            service = self.service_manager.get_service('fmp')  # Prefer FMP for fundamentals
+            fundamental_data = service.get_fundamental_data(ticker)
+            
+            if fundamental_data:
+                # Store fundamental data in database
+                self._store_fundamental_data(ticker, fundamental_data)
+                logger.debug(f"Successfully updated fundamentals for {ticker}")
+                return True
+            else:
+                logger.warning(f"No fundamental data returned for {ticker}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error updating fundamentals for {ticker}: {e}")
+            return False
+
+    def _store_fundamental_data(self, ticker: str, fundamental_data: Dict):
+        """
+        Store fundamental data in the company_fundamentals table.
+        """
+        try:
+            # Extract key fundamental metrics
+            revenue = fundamental_data.get('revenue', 0) or 0
+            net_income = fundamental_data.get('netIncome', 0) or 0
+            total_assets = fundamental_data.get('totalAssets', 0) or 0
+            total_debt = fundamental_data.get('totalDebt', 0) or 0
+            shares_outstanding = fundamental_data.get('sharesOutstanding', 0) or 0
+            
+            # Update or insert fundamental data
+            query = """
+            INSERT INTO company_fundamentals (
+                ticker, revenue, net_income, total_assets, 
+                total_debt, shares_outstanding, last_updated
+            ) VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE)
+            ON CONFLICT (ticker) DO UPDATE SET
+                revenue = EXCLUDED.revenue,
+                net_income = EXCLUDED.net_income,
+                total_assets = EXCLUDED.total_assets,
+                total_debt = EXCLUDED.total_debt,
+                shares_outstanding = EXCLUDED.shares_outstanding,
+                last_updated = EXCLUDED.last_updated
+            """
+            
+            values = (ticker, revenue, net_income, total_assets, total_debt, shares_outstanding)
+            self.db.execute_update(query, values)
+            logger.debug(f"Stored fundamental data for {ticker}")
+            
+        except Exception as e:
+            logger.error(f"Error storing fundamental data for {ticker}: {e}")
+
+    def _calculate_fundamental_ratios(self, ticker: str):
+        """
+        Calculate fundamental ratios based on current stock price and fundamental data.
+        """
+        try:
+            # Get current stock price
+            price_query = """
+            SELECT close 
+            FROM daily_charts 
+            WHERE ticker = %s 
+            ORDER BY date DESC 
+            LIMIT 1
+            """
+            price_result = self.db.execute_query(price_query, (ticker,))
+            
+            if not price_result:
+                logger.warning(f"No recent price data for {ticker} - cannot calculate ratios")
+                return
+                
+            current_price = float(price_result[0][0])
+            
+            # Get fundamental data
+            fundamental_query = """
+            SELECT revenue, net_income, total_assets, total_debt, shares_outstanding
+            FROM company_fundamentals 
+            WHERE ticker = %s
+            """
+            fundamental_result = self.db.execute_query(fundamental_query, (ticker,))
+            
+            if not fundamental_result:
+                logger.warning(f"No fundamental data for {ticker} - cannot calculate ratios")
+                return
+                
+            revenue, net_income, total_assets, total_debt, shares_outstanding = fundamental_result[0]
+            
+            # Calculate ratios using safe_divide (assuming it exists)
+            try:
+                from data_validator import safe_divide
+            except ImportError:
+                # Fallback safe divide function
+                def safe_divide(a, b, default=0.0):
+                    try:
+                        if b == 0 or b is None:
+                            return default
+                        return float(a) / float(b)
+                    except (TypeError, ValueError, ZeroDivisionError):
+                        return default
+            
+            # Calculate key ratios
+            market_cap = current_price * shares_outstanding if shares_outstanding else 0
+            pe_ratio = safe_divide(current_price, (net_income / shares_outstanding) if shares_outstanding else 0)
+            pb_ratio = safe_divide(market_cap, total_assets)
+            ps_ratio = safe_divide(market_cap, revenue)
+            debt_to_equity = safe_divide(total_debt, (total_assets - total_debt))
+            
+            # Store calculated ratios
+            ratio_query = """
+            UPDATE company_fundamentals SET
+                pe_ratio = %s,
+                pb_ratio = %s,
+                ps_ratio = %s,
+                debt_to_equity = %s,
+                market_cap = %s
+            WHERE ticker = %s
+            """
+            
+            ratio_values = (pe_ratio, pb_ratio, ps_ratio, debt_to_equity, market_cap, ticker)
+            self.db.execute_update(ratio_query, ratio_values)
+            
+            logger.debug(f"Calculated and stored ratios for {ticker}: PE={pe_ratio:.2f}, PB={pb_ratio:.2f}, PS={ps_ratio:.2f}")
+            
+        except Exception as e:
+            logger.error(f"Error calculating fundamental ratios for {ticker}: {e}")
 
     def _compile_results(self, phase_results: Dict) -> Dict:
         """Compile results from all phases."""

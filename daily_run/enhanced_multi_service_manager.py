@@ -659,6 +659,102 @@ class EnhancedMultiServiceManager:
         self.error_handler.handle_error(last_error or Exception(f"All services failed for {ticker} ({data_type})"), context)
         
         return None, "all_services_failed"
+
+    def get_service(self, service_name: str):
+        """
+        Get a specific service instance by name.
+        
+        This method provides compatibility with the daily trading system
+        that expects to call service_manager.get_service('fmp') etc.
+        
+        Args:
+            service_name: Name of the service ('fmp', 'yahoo_finance', 'alpha_vantage', etc.)
+            
+        Returns:
+            Service instance or None if not available
+        """
+        # Map service names to internal service IDs
+        service_name_mapping = {
+            'fmp': 'fmp',
+            'yahoo_finance': 'yahoo',
+            'yahoo': 'yahoo',
+            'alpha_vantage': 'alpha_vantage',
+            'finnhub': 'finnhub',
+            'polygon': 'polygon'
+        }
+        
+        # Get the internal service ID
+        service_id = service_name_mapping.get(service_name.lower(), service_name.lower())
+        
+        # Check if service exists and is available
+        if service_id in self.service_instances:
+            service = self.service_instances[service_id]
+            
+            # Create a wrapper that provides the expected interface
+            class ServiceWrapper:
+                def __init__(self, service_instance, service_id, manager):
+                    self.service = service_instance
+                    self.service_id = service_id
+                    self.manager = manager
+                    self.logger = logging.getLogger(f"service_wrapper_{service_id}")
+                
+                def get_fundamental_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+                    """Get fundamental data using the service"""
+                    try:
+                        if hasattr(self.service, 'get_fundamental_data'):
+                            return self.service.get_fundamental_data(ticker)
+                        else:
+                            self.logger.warning(f"Service {self.service_id} doesn't support fundamental data")
+                            return None
+                    except Exception as e:
+                        self.logger.error(f"Error getting fundamental data from {self.service_id}: {e}")
+                        return None
+                
+                def get_historical_data(self, ticker: str, days: int = 100) -> Optional[List[Dict]]:
+                    """Get historical data using the service"""
+                    try:
+                        if hasattr(self.service, 'get_historical_data'):
+                            return self.service.get_historical_data(ticker, days)
+                        elif hasattr(self.service, 'get_data'):
+                            # Use fallback method for services that only have get_data
+                            result = self.service.get_data(ticker)
+                            if result:
+                                # Convert single data point to historical format
+                                return [{
+                                    'date': datetime.now().strftime('%Y-%m-%d'),
+                                    'open': result.get('open', result.get('price')),
+                                    'high': result.get('high', result.get('price')),
+                                    'low': result.get('low', result.get('price')),
+                                    'close': result.get('close', result.get('price')),
+                                    'volume': result.get('volume', 0)
+                                }]
+                            return None
+                        else:
+                            self.logger.warning(f"Service {self.service_id} doesn't support historical data")
+                            return None
+                    except Exception as e:
+                        self.logger.error(f"Error getting historical data from {self.service_id}: {e}")
+                        return None
+                
+                def get_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+                    """Get current data using the service"""
+                    try:
+                        if hasattr(self.service, 'get_data'):
+                            return self.service.get_data(ticker)
+                        else:
+                            self.logger.warning(f"Service {self.service_id} doesn't support get_data")
+                            return None
+                    except Exception as e:
+                        self.logger.error(f"Error getting data from {self.service_id}: {e}")
+                        return None
+            
+            self.logger.debug(f"Returning service wrapper for {service_id}")
+            return ServiceWrapper(service, service_id, self)
+        
+        else:
+            self.logger.warning(f"Service '{service_name}' not available (mapped to '{service_id}')")
+            self.logger.debug(f"Available services: {list(self.service_instances.keys())}")
+            return None
     
     def _validate_result(self, result: Dict[str, Any], data_type: str) -> bool:
         """Validate API result data"""
