@@ -1,0 +1,542 @@
+{
+  "timestamp": "2025-07-05 14:32:51.926308",
+  "stocks_analysis": {
+    "total_stocks": 690,
+    "missing_company_info": [
+      {
+        "ticker": "Q",
+        "company_name": "Q2 Holdings Inc.",
+        "sector": "Technology",
+        "industry": "Software-Application",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "SHI",
+        "company_name": "Sinopec Shanghai Petrochemical Company Limited",
+        "sector": "Energy",
+        "industry": "Oil & Gas Refining & Marketing",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "SHLX",
+        "company_name": "Shell Midstream Partners LP",
+        "sector": "Energy",
+        "industry": "Oil & Gas Midstream",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "QTS",
+        "company_name": "QTS Realty Trust Inc.",
+        "sector": "Real Estate",
+        "industry": "REIT-Specialty",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "SNP",
+        "company_name": "China Petroleum & Chemical Corp",
+        "sector": "Energy",
+        "industry": "Oil & Gas Integrated",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "PDCE",
+        "company_name": "PDC Energy Inc.",
+        "sector": "Energy",
+        "industry": "Oil & Gas E&P",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "STAY",
+        "company_name": "Extended Stay America Inc",
+        "sector": "Consumer Cyclical",
+        "industry": "Lodging",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "SC",
+        "company_name": "Santander Consumer USA Holdings Inc.",
+        "sector": "Financial Services",
+        "industry": "Credit Services",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "DRE",
+        "company_name": "Duke Realty Corp",
+        "sector": "Real Estate",
+        "industry": "REITs-Industrial",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "ZNH",
+        "company_name": "China Southern Airlines Co Ltd",
+        "sector": "Industrials",
+        "industry": "Airlines",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "Y",
+        "company_name": "Alleghany Corp",
+        "sector": "Financial Services",
+        "industry": "Insurance-Reinsurance",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "PBCT",
+        "company_name": "People's United Financial Inc.",
+        "sector": "Financial Services",
+        "industry": "Banks-Regional",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "PTR",
+        "company_name": "PetroChina Company Limited",
+        "sector": "Energy",
+        "industry": "Oil & Gas Integrated",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "TCB",
+        "company_name": "TCF Financial Corp",
+        "sector": "Financial Services",
+        "industry": "Banks - Regional",
+        "market_cap": null
+      },
+      {
+        "ticker": "YPF",
+        "company_name": "YPF SA",
+        "sector": "Energy",
+        "industry": "Oil & Gas Integrated",
+        "market_cap": null
+      },
+      {
+        "ticker": "TES",
+        "company_name": "Tesla Inc",
+        "sector": "Consumer Cyclical",
+        "industry": "Auto Manufacturers",
+        "market_cap": null
+      },
+      {
+        "ticker": "TEV",
+        "company_name": "Teva Pharmaceutical Industries Ltd ADR",
+        "sector": "Healthcare",
+        "industry": "Drug Manufacturers - Specialty & Generic",
+        "market_cap": null
+      },
+      {
+        "ticker": "TII",
+        "company_name": "Tetra Tech Inc",
+        "sector": "Industrials",
+        "industry": "Engineering & Construction",
+        "market_cap": null
+      },
+      {
+        "ticker": "TLK",
+        "company_name": "Telkom Indonesia Persero Tbk PT ADR",
+        "sector": "Communication Services",
+        "industry": "Telecom Services",
+        "market_cap": null
+      },
+      {
+        "ticker": "TM",
+        "company_name": "Toyota Motor Corp ADR",
+        "sector": "Consumer Cyclical",
+        "industry": "Auto Manufacturers",
+        "market_cap": null
+      },
+      {
+        "ticker": "TIF",
+        "company_name": "Tiffany & Co",
+        "sector": "Consumer Cyclical",
+        "industry": "Luxury Goods",
+        "market_cap": null
+      },
+      {
+        "ticker": "TOT",
+        "company_name": "TotalEnergies SE ADR",
+        "sector": "Energy",
+        "industry": "Oil & Gas Integrated",
+        "market_cap": null
+      },
+      {
+        "ticker": "TXR",
+        "company_name": "Textron Inc",
+        "sector": "Industrials",
+        "industry": "Aerospace & Defense",
+        "market_cap": null
+      },
+      {
+        "ticker": "ZA",
+        "company_name": "Zalando SE",
+        "sector": "Consumer Discretionary",
+        "industry": "Internet Retail",
+        "market_cap": null
+      },
+      {
+        "ticker": "BRK.B",
+        "company_name": "Berkshire Hathaway Inc Class B",
+        "sector": "Financials",
+        "industry": "Insurance - Diversified",
+        "market_cap": null
+      },
+      {
+        "ticker": "ZE",
+        "company_name": "Zeekr Intelligent Technology Holding Ltd",
+        "sector": "Consumer Discretionary",
+        "industry": "Auto Manufacturers",
+        "market_cap": null
+      },
+      {
+        "ticker": "PKX",
+        "company_name": "POSCO Holdings Inc.",
+        "sector": "Materials",
+        "industry": "Steel",
+        "market_cap": null
+      },
+      {
+        "ticker": "PLT",
+        "company_name": "Plantronics Inc",
+        "sector": "Technology",
+        "industry": "Communication Equipment",
+        "market_cap": null
+      },
+      {
+        "ticker": "REP",
+        "company_name": "Repsol S.A.",
+        "sector": "Energy",
+        "industry": "Oil & Gas Integrated",
+        "market_cap": null
+      },
+      {
+        "ticker": "SBA",
+        "company_name": "SBA Communications Corporation",
+        "sector": "Real Estate",
+        "industry": "REIT-Specialty",
+        "market_cap": null
+      },
+      {
+        "ticker": "SCG",
+        "company_name": "SCANA Corporation",
+        "sector": "Utilities",
+        "industry": "Utilities-Regulated Electric",
+        "market_cap": null
+      },
+      {
+        "ticker": "SDE",
+        "company_name": "Sherwin-Williams Company",
+        "sector": "Materials",
+        "industry": "Specialty Chemicals",
+        "market_cap": null
+      },
+      {
+        "ticker": "SHG",
+        "company_name": "Shinhan Financial Group Co Ltd.",
+        "sector": "Financial Services",
+        "industry": "Banks-Diversified",
+        "market_cap": null
+      },
+      {
+        "ticker": "SNE",
+        "company_name": "Sony Group Corp",
+        "sector": "Technology",
+        "industry": "Consumer Electronics",
+        "market_cap": null
+      },
+      {
+        "ticker": "SOUP",
+        "company_name": "Campbell Soup Co",
+        "sector": "Consumer Defensive",
+        "industry": "Packaged Foods",
+        "market_cap": null
+      },
+      {
+        "ticker": "STO",
+        "company_name": "Statoil ASA",
+        "sector": "Energy",
+        "industry": "Oil & Gas Integrated",
+        "market_cap": null
+      },
+      {
+        "ticker": "SWP",
+        "company_name": "Stanley Works",
+        "sector": "Industrials",
+        "industry": "Tools & Hardware",
+        "market_cap": null
+      },
+      {
+        "ticker": "SYNC",
+        "company_name": "Synopsys Inc",
+        "sector": "Technology",
+        "industry": "Software - Infrastructure",
+        "market_cap": null
+      }
+    ],
+    "no_fundamentals": [
+      {
+        "ticker": "META",
+        "company_name": "Meta Platforms Inc",
+        "market_cap": "1715528901306.3657"
+      },
+      {
+        "ticker": "TSLA",
+        "company_name": "Tesla Inc",
+        "market_cap": "1036233106386.4717"
+      },
+      {
+        "ticker": "JPM",
+        "company_name": "JPMorgan Chase & Co",
+        "market_cap": "764250958828.57"
+      },
+      {
+        "ticker": "V",
+        "company_name": "Visa Inc Class A",
+        "market_cap": "656541147298.3617"
+      },
+      {
+        "ticker": "VUG",
+        "company_name": "Vanguard Growth ETF",
+        "market_cap": "106988770450.0"
+      },
+      {
+        "ticker": "SOFI",
+        "company_name": "SoFi Technologies Inc",
+        "market_cap": "16801472000.0"
+      },
+      {
+        "ticker": "TFI",
+        "company_name": "TFI International Inc",
+        "market_cap": "3190469731.0"
+      },
+      {
+        "ticker": "AAXJ",
+        "company_name": "iShares MSCI All Country Asia ex Japan ETF",
+        "market_cap": "2590895159.0"
+      },
+      {
+        "ticker": "STPZ",
+        "company_name": "STARWOOD PROPERTY TRUST INC",
+        "market_cap": "456916637.0"
+      },
+      {
+        "ticker": "SLX",
+        "company_name": "Steel Dynamics Inc",
+        "market_cap": "75973698.0"
+      },
+      {
+        "ticker": "SEA",
+        "company_name": "Seagate Technology Holdings plc",
+        "market_cap": "8582548.0"
+      },
+      {
+        "ticker": "AFTY",
+        "company_name": "Afterpay Ltd",
+        "market_cap": "4976874.0"
+      },
+      {
+        "ticker": "SNP",
+        "company_name": "China Petroleum & Chemical Corp",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "SHI",
+        "company_name": "Sinopec Shanghai Petrochemical Company Limited",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "Q",
+        "company_name": "Q2 Holdings Inc.",
+        "market_cap": "0.0"
+      },
+      {
+        "ticker": "TII",
+        "company_name": "Tetra Tech Inc",
+        "market_cap": null
+      },
+      {
+        "ticker": "TLK",
+        "company_name": "Telkom Indonesia Persero Tbk PT ADR",
+        "market_cap": null
+      },
+      {
+        "ticker": "TM",
+        "company_name": "Toyota Motor Corp ADR",
+        "market_cap": null
+      },
+      {
+        "ticker": "TOT",
+        "company_name": "TotalEnergies SE ADR",
+        "market_cap": null
+      },
+      {
+        "ticker": "TXR",
+        "company_name": "Textron Inc",
+        "market_cap": null
+      },
+      {
+        "ticker": "ZA",
+        "company_name": "Zalando SE",
+        "market_cap": null
+      },
+      {
+        "ticker": "ZE",
+        "company_name": "Zeekr Intelligent Technology Holding Ltd",
+        "market_cap": null
+      },
+      {
+        "ticker": "PKX",
+        "company_name": "POSCO Holdings Inc.",
+        "market_cap": null
+      },
+      {
+        "ticker": "REP",
+        "company_name": "Repsol S.A.",
+        "market_cap": null
+      },
+      {
+        "ticker": "SBA",
+        "company_name": "SBA Communications Corporation",
+        "market_cap": null
+      },
+      {
+        "ticker": "SCG",
+        "company_name": "SCANA Corporation",
+        "market_cap": null
+      },
+      {
+        "ticker": "SDE",
+        "company_name": "Sherwin-Williams Company",
+        "market_cap": null
+      },
+      {
+        "ticker": "SHG",
+        "company_name": "Shinhan Financial Group Co Ltd.",
+        "market_cap": null
+      },
+      {
+        "ticker": "SNE",
+        "company_name": "Sony Group Corp",
+        "market_cap": null
+      },
+      {
+        "ticker": "SOUP",
+        "company_name": "Campbell Soup Co",
+        "market_cap": null
+      },
+      {
+        "ticker": "STO",
+        "company_name": "Statoil ASA",
+        "market_cap": null
+      },
+      {
+        "ticker": "SWP",
+        "company_name": "Stanley Works",
+        "market_cap": null
+      },
+      {
+        "ticker": "TCB",
+        "company_name": "TCF Financial Corp",
+        "market_cap": null
+      },
+      {
+        "ticker": "YPF",
+        "company_name": "YPF SA",
+        "market_cap": null
+      },
+      {
+        "ticker": "TES",
+        "company_name": "Tesla Inc",
+        "market_cap": null
+      },
+      {
+        "ticker": "TEV",
+        "company_name": "Teva Pharmaceutical Industries Ltd ADR",
+        "market_cap": null
+      }
+    ],
+    "stale_fundamentals": [
+      {
+        "ticker": "NVDA",
+        "company_name": "NVIDIA Corporation",
+        "last_updated": "2025-06-23 21:46:47.185718",
+        "market_cap": "3887896000000.0"
+      },
+      {
+        "ticker": "MSFT",
+        "company_name": "Microsoft Corporation",
+        "last_updated": "2025-06-21 23:37:23.902764",
+        "market_cap": "3707648253600.0"
+      },
+      {
+        "ticker": "MSFT",
+        "company_name": "Microsoft Corporation",
+        "last_updated": "2025-06-23 20:30:54.065661",
+        "market_cap": "3707648253600.0"
+      },
+      {
+        "ticker": "AAPL",
+        "company_name": "Apple Inc",
+        "last_updated": "2025-06-21 20:02:49.171791",
+        "market_cap": "3189540090000.0"
+      },
+      {
+        "ticker": "AAPL",
+        "company_name": "Apple Inc",
+        "last_updated": "2025-06-22 00:12:06.692600",
+        "market_cap": "3189540090000.0"
+      },
+      {
+        "ticker": "AAPL",
+        "company_name": "Apple Inc",
+        "last_updated": "2025-06-22 16:07:00.918974",
+        "market_cap": "3189540090000.0"
+      },
+      {
+        "ticker": "AAPL",
+        "company_name": "Apple Inc",
+        "last_updated": "2025-06-23 20:34:49.106825",
+        "market_cap": "3189540090000.0"
+      },
+      {
+        "ticker": "AMZN",
+        "company_name": "Amazon.com Inc",
+        "last_updated": "2025-06-23 21:46:34.375661",
+        "market_cap": "2371809924000.0"
+      },
+      {
+        "ticker": "GOOGL",
+        "company_name": "Alphabet Inc",
+        "last_updated": "2025-06-21 23:33:19.553124",
+        "market_cap": "2183622671162.0"
+      },
+      {
+        "ticker": "GOOGL",
+        "company_name": "Alphabet Inc",
+        "last_updated": "2025-06-23 23:31:34.383943",
+        "market_cap": "2183622671162.0"
+      },
+      {
+        "ticker": "AVGO",
+        "company_name": "Broadcom Inc",
+        "last_updated": "2025-06-23 21:46:40.904163",
+        "market_cap": "1294300874600.0"
+      },
+      {
+        "ticker": "XOM",
+        "company_name": "Exxon Mobil Corporation",
+        "last_updated": "2025-06-23 21:47:00.287867",
+        "market_cap": "483541608000.0"
+      }
+    ]
+  },
+  "fundamentals_analysis": {},
+  "tickers_needing_data": [],
+  "summary": {
+    "total_stocks": 690,
+    "stocks_missing_info": 38,
+    "stocks_no_fundamentals": 36,
+    "stocks_stale_fundamentals": 12,
+    "total_fundamentals": 0,
+    "fundamentals_missing_data": 0,
+    "fundamentals_missing_ratios": 0,
+    "tickers_needing_updates": 0
+  }
+}

@@ -4,6 +4,7 @@ Database connection manager for daily_run module
 """
 
 import psycopg2
+import psycopg2.extras
 import logging
 from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
@@ -57,11 +58,43 @@ class DatabaseManager:
             if cursor:
                 cursor.close()
     
+    @contextmanager
+    def get_dict_cursor(self):
+        """Context manager for dictionary cursor"""
+        if not self.connection:
+            self.connect()
+        
+        cursor = None
+        try:
+            cursor = self.connection.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            yield cursor
+            self.connection.commit()
+        except Exception as e:
+            if self.connection:
+                self.connection.rollback()
+            self.logger.error(f"Database operation failed: {e}")
+            raise DatabaseError("operation", str(e))
+        finally:
+            if cursor:
+                cursor.close()
+    
     def execute_query(self, query: str, params: tuple = None) -> List[tuple]:
         """Execute a query and return results"""
         with self.get_cursor() as cursor:
             cursor.execute(query, params)
             return cursor.fetchall()
+    
+    def fetch_one(self, query: str, params: tuple = None) -> Optional[tuple]:
+        """Execute a query and return a single result"""
+        with self.get_cursor() as cursor:
+            cursor.execute(query, params)
+            return cursor.fetchone()
+    
+    def fetch_all_dict(self, query: str, params: tuple = None) -> List[Dict]:
+        """Execute a query and return results as dictionaries"""
+        with self.get_dict_cursor() as cursor:
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
     
     def execute_update(self, query: str, params: tuple = None) -> int:
         """Execute an update query and return affected rows"""
@@ -69,17 +102,59 @@ class DatabaseManager:
             cursor.execute(query, params)
             return cursor.rowcount
     
+    def execute_batch(self, query: str, params_list: List[tuple]) -> int:
+        """Execute batch operations for better performance"""
+        if not params_list:
+            return 0
+            
+        with self.get_cursor() as cursor:
+            psycopg2.extras.execute_batch(cursor, query, params_list)
+            return cursor.rowcount
+    
+    def execute_values(self, query: str, params_list: List[tuple]) -> int:
+        """Execute batch insert using VALUES for better performance"""
+        if not params_list:
+            return 0
+            
+        with self.get_cursor() as cursor:
+            psycopg2.extras.execute_values(cursor, query, params_list)
+            return cursor.rowcount
+    
     def get_tickers(self, table: str = 'stocks', active_only: bool = True) -> List[str]:
         """Get list of tickers from specified table"""
         if table == 'stocks':
-            query = "SELECT ticker FROM stocks"
+            query = "SELECT ticker FROM stocks WHERE ticker IS NOT NULL"
+            # Note: is_active column doesn't exist in current schema
         elif table == 'market_etf':
-            query = "SELECT etf_ticker FROM market_etf"
+            query = "SELECT etf_ticker FROM market_etf WHERE etf_ticker IS NOT NULL"
         else:
             raise DatabaseError("query", f"Unknown table: {table}")
         
+        if table == 'stocks':
+            query += " ORDER BY ticker"
+        else:
+            query += " ORDER BY etf_ticker"  # Use etf_ticker for ordering
         results = self.execute_query(query)
         return [row[0] for row in results]
+    
+    def get_tickers_batch(self, tickers: List[str], table: str = 'stocks') -> List[Dict]:
+        """Get ticker information in batch"""
+        if not tickers:
+            return []
+            
+        placeholders = ','.join(['%s'] * len(tickers))
+        
+        if table == 'stocks':
+            query = f"""
+            SELECT ticker, company_name, sector, market_cap
+            FROM stocks 
+            WHERE ticker IN ({placeholders})
+            ORDER BY ticker
+            """
+        else:
+            raise DatabaseError("query", f"Batch query not supported for table: {table}")
+        
+        return self.fetch_all_dict(query, tuple(tickers))
     
     def get_latest_price(self, ticker: str, table: str = 'daily_charts') -> Optional[float]:
         """Get latest price for a ticker"""
@@ -93,6 +168,61 @@ class DatabaseManager:
         if results and results[0][0]:
             return float(results[0][0]) / 100.0  # Convert cents to dollars
         return None
+    
+    def get_latest_prices_batch(self, tickers: List[str], table: str = 'daily_charts') -> Dict[str, float]:
+        """Get latest prices for multiple tickers efficiently"""
+        if not tickers:
+            return {}
+            
+        placeholders = ','.join(['%s'] * len(tickers))
+        query = f"""
+        SELECT DISTINCT ON (ticker) ticker, close
+        FROM {table}
+        WHERE ticker IN ({placeholders})
+        ORDER BY ticker, date DESC
+        """
+        
+        results = self.execute_query(query, tuple(tickers))
+        return {
+            row[0]: float(row[1]) / 100.0 if row[1] else None 
+            for row in results
+        }
+    
+    def get_tickers_needing_historical_data(self, min_days: int = 100) -> List[str]:
+        """Get tickers that need more historical data - optimized query"""
+        query = """
+        SELECT s.ticker
+        FROM stocks s
+        LEFT JOIN (
+            SELECT ticker, COUNT(*) as day_count
+            FROM daily_charts
+            GROUP BY ticker
+        ) dc ON s.ticker = dc.ticker
+        WHERE s.ticker IS NOT NULL
+        AND (dc.day_count IS NULL OR dc.day_count < %s)
+        ORDER BY COALESCE(dc.day_count, 0) ASC
+        """
+        
+        results = self.execute_query(query, (min_days,))
+        return [row[0] for row in results]
+    
+    def get_tickers_needing_fundamentals(self, days_old: int = 30) -> List[str]:
+        """Get tickers needing fundamental updates - optimized query"""
+        query = """
+        SELECT s.ticker
+        FROM stocks s
+        LEFT JOIN company_fundamentals cf ON s.ticker = cf.ticker
+        WHERE s.ticker IS NOT NULL
+        AND (
+            cf.ticker IS NULL 
+            OR cf.revenue IS NULL
+            OR cf.net_income IS NULL
+        )
+        ORDER BY s.ticker ASC
+        """
+        
+        results = self.execute_query(query)
+        return [row[0] for row in results]
     
     def update_price_data(self, ticker: str, price_data: Dict[str, Any], table: str = 'daily_charts'):
         """Update price data for a ticker"""
@@ -120,6 +250,160 @@ class DatabaseManager:
         )
         self.execute_update(query, params)
     
+    def update_price_data_batch(self, price_data_list: List[Dict[str, Any]]) -> int:
+        """Update price data for multiple tickers efficiently"""
+        if not price_data_list:
+            return 0
+            
+        query = """
+            INSERT INTO daily_charts (ticker, date, open, high, low, close, volume)
+            VALUES %s
+            ON CONFLICT (ticker, date) DO UPDATE SET
+                open = EXCLUDED.open,
+                high = EXCLUDED.high,
+                low = EXCLUDED.low,
+                close = EXCLUDED.close,
+                volume = EXCLUDED.volume
+        """
+        
+        current_date = date.today()
+        values = []
+        
+        for data in price_data_list:
+            values.append((
+                data.get('ticker'),
+                current_date,
+                data.get('open'),
+                data.get('high'),
+                data.get('low'),
+                data.get('close'),
+                data.get('volume')
+            ))
+        
+        return self.execute_values(query, values)
+    
+    def get_price_history(self, ticker: str, days: int = 100) -> List[Dict]:
+        """Get price history for a ticker"""
+        query = """
+        SELECT date, open, high, low, close, volume
+        FROM daily_charts
+        WHERE ticker = %s
+        ORDER BY date DESC
+        LIMIT %s
+        """
+        
+        return self.fetch_all_dict(query, (ticker, days))
+    
+    def check_data_freshness(self, table: str = 'daily_charts') -> Dict[str, Any]:
+        """Check data freshness statistics"""
+        query = f"""
+        SELECT 
+            COUNT(*) as total_records,
+            COUNT(DISTINCT ticker) as unique_tickers,
+            MAX(date) as latest_date,
+            MIN(date) as earliest_date,
+            COUNT(CASE WHEN date = CURRENT_DATE::text THEN 1 END) as today_records,
+            COUNT(CASE WHEN date >= (CURRENT_DATE - INTERVAL '7 days')::date::text THEN 1 END) as week_records
+        FROM {table}
+        """
+        
+        result = self.fetch_one(query)
+        if result:
+            return {
+                'total_records': result[0],
+                'unique_tickers': result[1],
+                'latest_date': result[2],
+                'earliest_date': result[3],
+                'today_records': result[4],
+                'week_records': result[5]
+            }
+        return {}
+    
+    def get_price_data_for_technicals(self, ticker: str, days: int = 100) -> List[Dict]:
+        """Get price data for technical indicator calculations"""
+        query = """
+        SELECT date, open, high, low, close, volume
+        FROM daily_charts 
+        WHERE ticker = %s 
+        ORDER BY date DESC 
+        LIMIT %s
+        """
+        return self.fetch_all_dict(query, (ticker, days))
+    
+    def update_technical_indicators(self, ticker: str, indicators: Dict[str, float], target_date: str = None):
+        """Update technical indicators for a ticker"""
+        if not target_date:
+            target_date = date.today().strftime('%Y-%m-%d')
+        
+        # Build dynamic update query based on available indicators
+        update_fields = []
+        values = []
+        
+        indicator_columns = {
+            'rsi_14': 'rsi_14',
+            'ema_20': 'ema_20', 
+            'ema_50': 'ema_50',
+            'macd_line': 'macd_line',
+            'macd_signal': 'macd_signal',
+            'macd_histogram': 'macd_histogram',
+            'bb_upper': 'bb_upper',
+            'bb_middle': 'bb_middle',
+            'bb_lower': 'bb_lower',
+            'atr_14': 'atr_14',
+            'cci_20': 'cci_20',
+            'stoch_k': 'stoch_k',
+            'stoch_d': 'stoch_d'
+        }
+        
+        for indicator, value in indicators.items():
+            if indicator in indicator_columns and value is not None:
+                update_fields.append(f"{indicator_columns[indicator]} = %s")
+                values.append(value)
+        
+        if update_fields:
+            values.extend([ticker, target_date])
+            query = f"""
+            UPDATE daily_charts 
+            SET {', '.join(update_fields)}
+            WHERE ticker = %s AND date = %s
+            """
+            
+            return self.execute_update(query, tuple(values))
+        return 0
+    
+    def create_indexes_if_missing(self):
+        """Create database indexes for better performance"""
+        # Use separate connections for non-transactional index creation
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_daily_charts_ticker_date ON daily_charts(ticker, date DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_daily_charts_date ON daily_charts(date DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_company_fundamentals_ticker ON company_fundamentals(ticker)",
+            "CREATE INDEX IF NOT EXISTS idx_stocks_ticker ON stocks(ticker)"
+        ]
+        
+        for index_sql in indexes:
+            try:
+                # Use a separate connection for each index to avoid transaction issues
+                temp_conn = psycopg2.connect(**self.config)
+                temp_conn.autocommit = True
+                with temp_conn.cursor() as cursor:
+                    cursor.execute(index_sql)
+                temp_conn.close()
+                self.logger.info(f"Index created/verified: {index_sql.split()[-3]}")
+            except Exception as e:
+                self.logger.warning(f"Index creation failed (may already exist): {e}")
+    
+    def analyze_tables(self):
+        """Update table statistics for better query planning"""
+        tables = ['daily_charts', 'stocks', 'company_fundamentals']
+        
+        for table in tables:
+            try:
+                self.execute_update(f"ANALYZE {table}")
+                self.logger.info(f"Analyzed table: {table}")
+            except Exception as e:
+                self.logger.error(f"Failed to analyze table {table}: {e}")
+    
     def test_connection(self) -> bool:
         """Test database connection"""
         try:
@@ -146,25 +430,51 @@ def test_database():
             print("❌ Database connection test failed")
             return
         
+        # Create indexes for better performance
+        db.create_indexes_if_missing()
+        print("✅ Database indexes checked/created")
+        
         # Test getting tickers
-        tickers = db.get_tickers('stocks', active_only=True)
-        print(f"✅ Retrieved {len(tickers)} active tickers")
+        tickers = db.get_tickers('stocks')
+        print(f"✅ Retrieved {len(tickers)} tickers")
         
         if tickers:
-            # Test getting latest price
-            test_ticker = tickers[0]
-            price = db.get_latest_price(test_ticker)
-            if price:
-                print(f"✅ Latest price for {test_ticker}: ${price:.2f}")
-            else:
-                print(f"⚠️  No price data for {test_ticker}")
+            # Test batch operations
+            sample_tickers = tickers[:5]
+            batch_info = db.get_tickers_batch(sample_tickers)
+            print(f"✅ Batch ticker info retrieved for {len(batch_info)} tickers")
+            
+            # Test latest prices batch
+            latest_prices = db.get_latest_prices_batch(sample_tickers)
+            print(f"✅ Batch latest prices retrieved for {len(latest_prices)} tickers")
+            
+            # Test data freshness
+            freshness = db.check_data_freshness()
+            print(f"✅ Data freshness check: {freshness.get('today_records', 0)} records today")
+            
+            # Test historical data needs
+            historical_needed = db.get_tickers_needing_historical_data()
+            print(f"✅ Found {len(historical_needed)} tickers needing historical data")
+            
+            # Test fundamental data needs
+            fundamentals_needed = db.get_tickers_needing_fundamentals()
+            print(f"✅ Found {len(fundamentals_needed)} tickers needing fundamental updates")
         
         # Test market ETFs
-        etf_tickers = db.get_tickers('market_etf')
-        print(f"✅ Retrieved {len(etf_tickers)} ETF tickers")
+        try:
+            etf_tickers = db.get_tickers('market_etf')
+            print(f"✅ Retrieved {len(etf_tickers)} ETF tickers")
+        except Exception as e:
+            print(f"⚠️  ETF table test failed (table may not exist): {e}")
+        
+        # Analyze tables for better performance
+        db.analyze_tables()
+        print("✅ Table statistics updated")
         
     except Exception as e:
         print(f"❌ Database test failed: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         db.disconnect()
         print("✅ Database manager test completed")

@@ -1,399 +1,353 @@
-#!/usr/bin/env python3
 """
-Alpha Vantage Financial Data Service
+Alpha Vantage Service
+
+Modern Alpha Vantage API service with rate limiting and error handling.
+Free tier: 5 API calls per minute, 100 calls per day.
 """
 
-from common_imports import (
-    os, time, logging, requests, pd, datetime, timedelta, 
-    psycopg2, DB_CONFIG, setup_logging, get_api_rate_limiter, safe_get_numeric
-)
+import logging
+import requests
+import time
+from typing import Dict, List, Optional, Any
+from datetime import datetime, timedelta
+import pandas as pd
 from dotenv import load_dotenv
-from typing import Dict, Optional, List, Any
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+import os
+
+from database import DatabaseManager
+from error_handler import ErrorHandler
 
 # Load environment variables
 load_dotenv()
 
-# Setup logging for this service
-setup_logging('alpha_vantage')
+logger = logging.getLogger(__name__)
+
 
 class AlphaVantageService:
-    def __init__(self):
+    """
+    Alpha Vantage API service with intelligent rate limiting
+    
+    Features:
+    - 5 calls per minute rate limiting (free tier)
+    - Comprehensive fundamental data
+    - Real-time and historical pricing
+    - Automatic error handling and retries
+    """
+    
+    def __init__(self, db: Optional[DatabaseManager] = None):
+        self.db = db or DatabaseManager()
+        self.error_handler = ErrorHandler("alpha_vantage_service")
+        self.service_name = "Alpha Vantage"
+        self.logger = logging.getLogger("alpha_vantage_service")
+        
+        # API configuration
         self.api_key = os.getenv('ALPHA_VANTAGE_API_KEY')
-        self.base_url = 'https://www.alphavantage.co/query'
-        self.api_limiter = get_api_rate_limiter()
-        self.conn = psycopg2.connect(**DB_CONFIG)
-        self.cur = self.conn.cursor()
-        self.max_retries = 3
-        self.base_delay = 1  # seconds
-
-    def fetch_income_statement(self, ticker: str) -> Optional[Dict]:
-        """Fetch income statement from Alpha Vantage"""
+        self.base_url = "https://www.alphavantage.co/query"
+        
+        # Rate limiting (free tier)
+        self.calls_per_minute = 5
+        self.calls_per_day = 100
+        self.delay_between_requests = 12.0  # 60 seconds / 5 calls = 12 seconds
+        
+        # Track API usage
+        self.call_history = []
+        self.daily_calls = 0
+        self.last_reset_date = datetime.now().date()
+        
+        if not self.api_key:
+            self.logger.warning("⚠️ Alpha Vantage API key not found - service will be limited")
+        else:
+            self.logger.info("✅ Alpha Vantage service initialized")
+    
+    def _check_rate_limit(self) -> bool:
+        """Check if we can make an API call within rate limits"""
+        now = datetime.now()
+        
+        # Reset daily counter if new day
+        if now.date() > self.last_reset_date:
+            self.daily_calls = 0
+            self.last_reset_date = now.date()
+        
+        # Check daily limit
+        if self.daily_calls >= self.calls_per_day:
+            self.logger.warning(f"Daily limit reached ({self.calls_per_day} calls)")
+            return False
+        
+        # Check minute limit
+        minute_ago = now - timedelta(minutes=1)
+        recent_calls = [call for call in self.call_history if call > minute_ago]
+        
+        if len(recent_calls) >= self.calls_per_minute:
+            self.logger.warning(f"Minute limit reached ({self.calls_per_minute} calls/min)")
+            return False
+        
+        return True
+    
+    def _record_api_call(self):
+        """Record an API call for rate limiting"""
+        now = datetime.now()
+        self.call_history.append(now)
+        self.daily_calls += 1
+        
+        # Keep only last hour of call history
+        hour_ago = now - timedelta(hours=1)
+        self.call_history = [call for call in self.call_history if call > hour_ago]
+    
+    def _wait_for_rate_limit(self):
+        """Wait if necessary to respect rate limits"""
+        if not self._check_rate_limit():
+            self.logger.info(f"Waiting {self.delay_between_requests} seconds for rate limit...")
+            time.sleep(self.delay_between_requests)
+    
+    def _make_request(self, function: str, symbol: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """Make a rate-limited API request"""
+        if not self.api_key:
+            self.logger.error("No API key available")
+            return None
+        
+        self._wait_for_rate_limit()
+        
+        params = {
+            'function': function,
+            'symbol': symbol,
+            'apikey': self.api_key,
+            **kwargs
+        }
+        
         try:
-            # Check API limit
-            provider = 'alphavantage'
-            endpoint = 'income_statement'
-            if not self.api_limiter.check_limit(provider, endpoint):
-                logging.warning(f"Alpha Vantage API limit reached for {ticker}")
-                return None
-
-            url = self.base_url
-            params = {
-                'function': 'INCOME_STATEMENT',
-                'symbol': ticker,
-                'apikey': self.api_key
-            }
-            
-            response = requests.get(url, params=params, timeout=30)
-            self.api_limiter.record_call(provider, endpoint)
+            response = requests.get(self.base_url, params=params, timeout=30)
+            self._record_api_call()
             
             if response.status_code == 200:
                 data = response.json()
-                if 'annualReports' in data and data['annualReports']:
-                    return self.parse_income_statement(ticker, data['annualReports'][0])
-                else:
-                    logging.warning(f"No income statement data available for {ticker} from Alpha Vantage")
-                    return None
+                
+                # Check for API limit messages
+                if 'Information' in data:
+                    info_msg = data['Information']
+                    if 'rate limit' in info_msg.lower() or '5 calls per minute' in info_msg:
+                        self.logger.warning("Rate limit hit - backing off")
+                        time.sleep(self.delay_between_requests)
+                        return None
+                
+                return data
             else:
-                logging.error(f"Alpha Vantage API error for {ticker}: {response.status_code}")
+                self.logger.error(f"HTTP {response.status_code}: {response.text}")
                 return None
                 
         except Exception as e:
-            logging.error(f"Error fetching income statement for {ticker}: {e}")
+            self.logger.error(f"API request failed: {e}")
             return None
-
-    def fetch_balance_sheet(self, ticker: str) -> Optional[Dict]:
-        """Fetch balance sheet from Alpha Vantage"""
+    
+    def get_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get current pricing data for a ticker
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Dict with pricing data or None if failed
+        """
         try:
-            provider = 'alphavantage'
-            endpoint = 'balance_sheet'
-            if not self.api_limiter.check_limit(provider, endpoint):
-                logging.warning(f"Alpha Vantage API limit reached for {ticker}")
+            self.logger.debug(f"Fetching pricing data for {ticker}")
+            
+            data = self._make_request('GLOBAL_QUOTE', ticker)
+            if not data or 'Global Quote' not in data:
                 return None
-
-            url = self.base_url
-            params = {
-                'function': 'BALANCE_SHEET',
-                'symbol': ticker,
-                'apikey': self.api_key
+            
+            quote = data['Global Quote']
+            if not quote:
+                return None
+            
+            return {
+                'ticker': ticker,
+                'price': float(quote.get('05. price', 0)),
+                'open': float(quote.get('02. open', 0)),
+                'high': float(quote.get('03. high', 0)),
+                'low': float(quote.get('04. low', 0)),
+                'volume': int(quote.get('06. volume', 0)) if quote.get('06. volume') else 0,
+                'change': float(quote.get('09. change', 0)),
+                'change_percent': quote.get('10. change percent', '0%').replace('%', ''),
+                'data_source': 'alpha_vantage',
+                'timestamp': datetime.now()
             }
             
-            response = requests.get(url, params=params, timeout=30)
-            self.api_limiter.record_call(provider, endpoint)
+        except Exception as e:
+            self.logger.error(f"Error fetching pricing data for {ticker}: {e}")
+            return None
+    
+    def get_fundamental_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get fundamental data for a ticker
+        
+        Args:
+            ticker: Stock ticker symbol
             
-            if response.status_code == 200:
-                data = response.json()
-                if 'annualReports' in data and data['annualReports']:
-                    return self.parse_balance_sheet(ticker, data['annualReports'][0])
+        Returns:
+            Dict with fundamental data or None if failed
+        """
+        try:
+            self.logger.debug(f"Fetching fundamental data for {ticker}")
+            
+            # Get company overview (includes key metrics)
+            overview_data = self._make_request('OVERVIEW', ticker)
+            if not overview_data:
+                return None
+            
+            # Extract fundamental metrics
+            fundamental_data = {
+                'ticker': ticker,
+                'market_cap': self._safe_numeric(overview_data.get('MarketCapitalization')),
+                'revenue_ttm': self._safe_numeric(overview_data.get('RevenueTTM')),
+                'gross_profit_ttm': self._safe_numeric(overview_data.get('GrossProfitTTM')),
+                'net_income_ttm': self._safe_numeric(overview_data.get('NetIncome')),
+                'ebitda': self._safe_numeric(overview_data.get('EBITDA')),
+                'pe_ratio': self._safe_numeric(overview_data.get('PERatio')),
+                'peg_ratio': self._safe_numeric(overview_data.get('PEGRatio')),
+                'pb_ratio': self._safe_numeric(overview_data.get('PriceToBookRatio')),
+                'ps_ratio': self._safe_numeric(overview_data.get('PriceToSalesRatioTTM')),
+                'ev_revenue': self._safe_numeric(overview_data.get('EVToRevenue')),
+                'ev_ebitda': self._safe_numeric(overview_data.get('EVToEBITDA')),
+                'profit_margin': self._safe_numeric(overview_data.get('ProfitMargin')),
+                'operating_margin': self._safe_numeric(overview_data.get('OperatingMarginTTM')),
+                'roe': self._safe_numeric(overview_data.get('ReturnOnEquityTTM')),
+                'roa': self._safe_numeric(overview_data.get('ReturnOnAssetsTTM')),
+                'debt_to_equity': self._safe_numeric(overview_data.get('DebtToEquity')),
+                'current_ratio': self._safe_numeric(overview_data.get('CurrentRatio')),
+                'quick_ratio': self._safe_numeric(overview_data.get('QuickRatio')),
+                'book_value': self._safe_numeric(overview_data.get('BookValue')),
+                'shares_outstanding': self._safe_numeric(overview_data.get('SharesOutstanding')),
+                'dividend_yield': self._safe_numeric(overview_data.get('DividendYield')),
+                'beta': self._safe_numeric(overview_data.get('Beta')),
+                'eps_ttm': self._safe_numeric(overview_data.get('EPS')),
+                'data_source': 'alpha_vantage',
+                'timestamp': datetime.now()
+            }
+            
+            return fundamental_data
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching fundamental data for {ticker}: {e}")
+            return None
+    
+    def get_batch_data(self, tickers: List[str], data_type: str = 'pricing') -> Dict[str, Dict[str, Any]]:
+        """
+        Get data for multiple tickers (sequential due to rate limits)
+        
+        Args:
+            tickers: List of ticker symbols
+            data_type: 'pricing' or 'fundamentals'
+            
+        Returns:
+            Dict mapping ticker to data
+        """
+        results = {}
+        
+        # Alpha Vantage doesn't support batch requests, so we process sequentially
+        self.logger.info(f"Processing {len(tickers)} tickers sequentially (rate limited)")
+        
+        for ticker in tickers:
+            try:
+                if data_type == 'pricing':
+                    data = self.get_data(ticker)
                 else:
-                    logging.warning(f"No balance sheet data available for {ticker} from Alpha Vantage")
-                    return None
-            else:
-                logging.error(f"Alpha Vantage API error for {ticker}: {response.status_code}")
-                return None
+                    data = self.get_fundamental_data(ticker)
                 
-        except Exception as e:
-            logging.error(f"Error fetching balance sheet for {ticker}: {e}")
+                if data:
+                    results[ticker] = data
+                    
+            except Exception as e:
+                self.logger.error(f"Error processing {ticker}: {e}")
+        
+        self.logger.info(f"Successfully processed {len(results)}/{len(tickers)} tickers")
+        return results
+    
+    def _safe_numeric(self, value: Any) -> Optional[float]:
+        """Safely convert value to float"""
+        if value is None or value == 'None' or value == '-':
             return None
-
-    def fetch_cash_flow(self, ticker: str) -> Optional[Dict]:
-        """Fetch cash flow statement from Alpha Vantage"""
+        
         try:
-            provider = 'alphavantage'
-            endpoint = 'cash_flow'
-            if not self.api_limiter.check_limit(provider, endpoint):
-                logging.warning(f"Alpha Vantage API limit reached for {ticker}")
-                return None
-
-            url = self.base_url
-            params = {
-                'function': 'CASH_FLOW',
-                'symbol': ticker,
-                'apikey': self.api_key
-            }
+            # Handle percentage strings
+            if isinstance(value, str) and '%' in value:
+                return float(value.replace('%', '')) / 100
             
-            response = requests.get(url, params=params, timeout=30)
-            self.api_limiter.record_call(provider, endpoint)
+            # Handle strings with units (e.g., "1.5B")
+            if isinstance(value, str):
+                value = value.replace(',', '')
+                multipliers = {'K': 1000, 'M': 1000000, 'B': 1000000000, 'T': 1000000000000}
+                for suffix, mult in multipliers.items():
+                    if value.endswith(suffix):
+                        return float(value[:-1]) * mult
             
-            if response.status_code == 200:
-                data = response.json()
-                if 'annualReports' in data and data['annualReports']:
-                    return self.parse_cash_flow(ticker, data['annualReports'][0])
-                else:
-                    logging.warning(f"No cash flow data available for {ticker} from Alpha Vantage")
-                    return None
-            else:
-                logging.error(f"Alpha Vantage API error for {ticker}: {response.status_code}")
-                return None
-                
-        except Exception as e:
-            logging.error(f"Error fetching cash flow for {ticker}: {e}")
-            return None
-
-    def fetch_overview(self, ticker: str) -> Optional[Dict]:
-        """Fetch company overview from Alpha Vantage"""
-        try:
-            provider = 'alphavantage'
-            endpoint = 'overview'
-            if not self.api_limiter.check_limit(provider, endpoint):
-                logging.warning(f"Alpha Vantage API limit reached for {ticker}")
-                return None
-
-            url = self.base_url
-            params = {
-                'function': 'OVERVIEW',
-                'symbol': ticker,
-                'apikey': self.api_key
-            }
+            return float(value)
             
-            response = requests.get(url, params=params, timeout=30)
-            self.api_limiter.record_call(provider, endpoint)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data and 'Symbol' in data:
-                    return self.parse_overview(ticker, data)
-                else:
-                    logging.warning(f"No overview data available for {ticker} from Alpha Vantage")
-                    return None
-            else:
-                logging.error(f"Alpha Vantage API error for {ticker}: {response.status_code}")
-                return None
-                
-        except Exception as e:
-            logging.error(f"Error fetching overview for {ticker}: {e}")
-            return None
-
-    def parse_income_statement(self, ticker: str, data: Dict) -> Optional[Dict]:
-        """Parse income statement data from Alpha Vantage"""
-        try:
-            income_statement = {
-                'ticker': ticker,
-                'data_source': 'alphavantage',
-                'last_updated': datetime.now(),
-                'revenue': self.safe_get_numeric(data, 'totalRevenue'),
-                'gross_profit': self.safe_get_numeric(data, 'grossProfit'),
-                'operating_income': self.safe_get_numeric(data, 'operatingIncome'),
-                'net_income': self.safe_get_numeric(data, 'netIncome'),
-                'ebitda': self.safe_get_numeric(data, 'ebitda'),
-                'fiscal_year': int(data.get('fiscalDateEnding', '').split('-')[0]) if data.get('fiscalDateEnding') else None,
-                'fiscal_quarter': None,
-                'ttm_periods': 1  # Alpha Vantage provides annual data
-            }
-            
-            return income_statement
-            
-        except Exception as e:
-            logging.error(f"Error parsing income statement for {ticker}: {e}")
-            return None
-
-    def parse_balance_sheet(self, ticker: str, data: Dict) -> Optional[Dict]:
-        """Parse balance sheet data from Alpha Vantage"""
-        try:
-            balance_sheet = {
-                'ticker': ticker,
-                'data_source': 'alphavantage',
-                'last_updated': datetime.now(),
-                'total_assets': self.safe_get_numeric(data, 'totalAssets'),
-                'total_debt': self.safe_get_numeric(data, 'totalDebt'),
-                'total_equity': self.safe_get_numeric(data, 'totalShareholderEquity'),
-                'cash_and_equivalents': self.safe_get_numeric(data, 'cashAndCashEquivalentsAtCarryingValue'),
-                'current_assets': self.safe_get_numeric(data, 'totalCurrentAssets'),
-                'current_liabilities': self.safe_get_numeric(data, 'totalCurrentLiabilities'),
-                'fiscal_year': int(data.get('fiscalDateEnding', '').split('-')[0]) if data.get('fiscalDateEnding') else None
-            }
-            
-            return balance_sheet
-            
-        except Exception as e:
-            logging.error(f"Error parsing balance sheet for {ticker}: {e}")
-            return None
-
-    def parse_cash_flow(self, ticker: str, data: Dict) -> Optional[Dict]:
-        """Parse cash flow data from Alpha Vantage"""
-        try:
-            cash_flow = {
-                'ticker': ticker,
-                'data_source': 'alphavantage',
-                'last_updated': datetime.now(),
-                'operating_cash_flow': self.safe_get_numeric(data, 'operatingCashflow'),
-                'free_cash_flow': self.safe_get_numeric(data, 'operatingCashflow') - self.safe_get_numeric(data, 'capitalExpenditures'),
-                'capex': self.safe_get_numeric(data, 'capitalExpenditures'),
-                'fiscal_year': int(data.get('fiscalDateEnding', '').split('-')[0]) if data.get('fiscalDateEnding') else None
-            }
-            
-            return cash_flow
-            
-        except Exception as e:
-            logging.error(f"Error parsing cash flow for {ticker}: {e}")
-            return None
-
-    def parse_overview(self, ticker: str, data: Dict) -> Optional[Dict]:
-        """Parse company overview data from Alpha Vantage"""
-        try:
-            overview = {
-                'ticker': ticker,
-                'data_source': 'alphavantage',
-                'last_updated': datetime.now(),
-                'market_data': {
-                    'market_cap': self.safe_get_numeric(data, 'MarketCapitalization'),
-                    'shares_outstanding': self.safe_get_numeric(data, 'SharesOutstanding'),
-                    'current_price': self.safe_get_numeric(data, 'LatestPrice')
-                },
-                'ratios': {
-                    'pe_ratio': self.safe_get_numeric(data, 'PERatio'),
-                    'pb_ratio': self.safe_get_numeric(data, 'PriceToBookRatio'),
-                    'ps_ratio': self.safe_get_numeric(data, 'PriceToSalesRatio'),
-                    'debt_to_equity': self.safe_get_numeric(data, 'DebtToEquityRatio')
-                },
-                'per_share_metrics': {
-                    'eps_diluted': self.safe_get_numeric(data, 'EPS'),
-                    'book_value_per_share': self.safe_get_numeric(data, 'BookValue')
-                }
-            }
-            
-            return overview
-            
-        except Exception as e:
-            logging.error(f"Error parsing overview for {ticker}: {e}")
-            return None
-
-    def safe_get_numeric(self, data: Dict, key: str) -> Optional[float]:
-        """Safely get numeric value from dictionary"""
-        try:
-            value = data.get(key)
-            if value is not None and value != 'N/A' and value != '' and value != 'None':
-                return float(value)
-            return None
         except (ValueError, TypeError):
             return None
-
-    def store_fundamental_data(self, ticker: str, income_stmt: Dict, balance_sheet: Dict, 
-                              cash_flow: Dict, overview: Dict) -> bool:
-        """Store fundamental data in the database"""
-        try:
-            # Extract data
-            market_data = overview.get('market_data', {}) if overview else {}
-            per_share = overview.get('per_share_metrics', {}) if overview else {}
-
-            # Update stocks table
-            update_data = {
-                'market_cap': market_data.get('market_cap'),
-                'shares_outstanding': market_data.get('shares_outstanding'),
-                'revenue_ttm': income_stmt.get('revenue') if income_stmt else None,
-                'net_income_ttm': income_stmt.get('net_income') if income_stmt else None,
-                'ebitda_ttm': income_stmt.get('ebitda') if income_stmt else None,
-                'diluted_eps_ttm': per_share.get('eps_diluted'),
-                'book_value_per_share': per_share.get('book_value_per_share'),
-                'total_debt': balance_sheet.get('total_debt') if balance_sheet else None,
-                'shareholders_equity': balance_sheet.get('total_equity') if balance_sheet else None,
-                'cash_and_equivalents': balance_sheet.get('cash_and_equivalents') if balance_sheet else None,
-                'fundamentals_last_update': datetime.now()
-            }
-
-            # Filter out None values
-            update_data = {k: v for k, v in update_data.items() if v is not None}
-            
-            if update_data:
-                set_clause = ", ".join([f"{key} = %s" for key in update_data.keys()])
-                values = list(update_data.values()) + [ticker]
-
-                self.cur.execute(f"""
-                    UPDATE stocks 
-                    SET {set_clause}
-                    WHERE ticker = %s
-                """, tuple(values))
-
-            # Store in company_fundamentals table
-            if income_stmt:
-                self.cur.execute("""
-                    INSERT INTO company_fundamentals 
-                    (ticker, report_date, period_type, fiscal_year, fiscal_quarter,
-                     revenue, gross_profit, operating_income, net_income, ebitda,
-                     data_source, last_updated)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (ticker, report_date, period_type)
-                    DO UPDATE SET
-                        revenue = COALESCE(EXCLUDED.revenue, company_fundamentals.revenue),
-                        gross_profit = COALESCE(EXCLUDED.gross_profit, company_fundamentals.gross_profit),
-                        operating_income = COALESCE(EXCLUDED.operating_income, company_fundamentals.operating_income),
-                        net_income = COALESCE(EXCLUDED.net_income, company_fundamentals.net_income),
-                        ebitda = COALESCE(EXCLUDED.ebitda, company_fundamentals.ebitda),
-                        fiscal_year = EXCLUDED.fiscal_year,
-                        fiscal_quarter = EXCLUDED.fiscal_quarter,
-                        data_source = EXCLUDED.data_source,
-                        last_updated = CURRENT_TIMESTAMP
-                """, (
-                    ticker, datetime.now().date(), 'annual', income_stmt.get('fiscal_year'), income_stmt.get('fiscal_quarter'),
-                    income_stmt.get('revenue'), income_stmt.get('gross_profit'),
-                    income_stmt.get('operating_income'), income_stmt.get('net_income'),
-                    income_stmt.get('ebitda'), 'alphavantage', datetime.now()
-                ))
-            
-            self.conn.commit()
-            logging.info(f"Successfully stored fundamental data for {ticker}")
-            return True
-            
-        except Exception as e:
-            logging.error(f"Error storing fundamental data for {ticker}: {e}")
-            self.conn.rollback()
-            return False
-
-    def get_fundamental_data(self, ticker: str) -> Optional[Dict]:
-        """Main method to fetch and store fundamental data"""
-        try:
-            # Fetch all financial data
-            income_stmt = self.fetch_income_statement(ticker)
-            balance_sheet = self.fetch_balance_sheet(ticker)
-            cash_flow = self.fetch_cash_flow(ticker)
-            overview = self.fetch_overview(ticker)
-            
-            # Store data if available
-            if any([income_stmt, balance_sheet, cash_flow, overview]):
-                success = self.store_fundamental_data(ticker, income_stmt, balance_sheet, cash_flow, overview)
-                if success:
-                    return {
-                        'income_statement': income_stmt,
-                        'balance_sheet': balance_sheet,
-                        'cash_flow': cash_flow,
-                        'overview': overview
-                    }
-            
-            return None
-            
-        except Exception as e:
-            logging.error(f"Error getting fundamental data for {ticker}: {e}")
-            return None
-
-    def close(self):
-        """Close database connections"""
-        if self.cur:
-            self.cur.close()
-        if self.conn:
-            self.conn.close()
-        if self.api_limiter:
-            self.api_limiter.close()
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--ticker', type=str, default='AAPL', help='Ticker symbol to fetch')
-    args = parser.parse_args()
     
-    service = AlphaVantageService()
-    test_ticker = args.ticker
-    result = service.get_fundamental_data(test_ticker)
-    if result:
-        print(f"Successfully fetched fundamental data for {test_ticker}")
-        if result.get('income_statement'):
-            print(f"Income statement keys: {list(result['income_statement'].keys())}")
-        if result.get('balance_sheet'):
-            print(f"Balance sheet keys: {list(result['balance_sheet'].keys())}")
-        if result.get('cash_flow'):
-            print(f"Cash flow keys: {list(result['cash_flow'].keys())}")
-        if result.get('overview'):
-            print(f"Overview keys: {list(result['overview'].keys())}")
-    else:
-        print(f"Failed to fetch fundamental data for {test_ticker}")
-    service.close() 
+    def check_service_health(self) -> bool:
+        """
+        Check if Alpha Vantage service is available
+        
+        Returns:
+            True if service is healthy, False otherwise
+        """
+        try:
+            if not self.api_key:
+                self.logger.warning("⚠️ No API key - service not available")
+                return False
+            
+            # Test with a simple quote request
+            data = self.get_data("AAPL")
+            
+            if data and data.get('price'):
+                self.logger.info("✅ Alpha Vantage service health check passed")
+                return True
+            else:
+                self.logger.warning("⚠️ Alpha Vantage service health check failed - no data")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ Alpha Vantage service health check failed: {e}")
+            return False
+    
+    def get_service_info(self) -> Dict[str, Any]:
+        """
+        Get information about this service
+        
+        Returns:
+            Dict with service information
+        """
+        return {
+            'name': self.service_name,
+            'type': 'freemium',
+            'api_key_required': True,
+            'rate_limits': {
+                'requests_per_minute': self.calls_per_minute,
+                'requests_per_day': self.calls_per_day
+            },
+            'capabilities': [
+                'real_time_pricing',
+                'fundamental_data',
+                'company_overview',
+                'key_ratios',
+                'financial_metrics'
+            ],
+            'data_types': [
+                'pricing',
+                'fundamentals',
+                'ratios',
+                'overview'
+            ],
+            'coverage': [
+                'US_stocks',
+                'international_stocks',
+                'forex',
+                'crypto'
+            ],
+            'cost_per_call': 0.0,
+            'reliability_score': 0.85,
+            'batch_limit': 1,  # No native batch support
+            'daily_usage': self.daily_calls,
+            'daily_limit': self.calls_per_day
+        } 

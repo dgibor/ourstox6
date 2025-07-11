@@ -140,6 +140,48 @@ class SystemMonitor:
         self.service_health["database"] = health
         return health
     
+    def record_metric(self, metric_name: str, value: float):
+        """
+        Record a custom metric for monitoring.
+        
+        Args:
+            metric_name: Name of the metric
+            value: Metric value
+        """
+        try:
+            # Store metric in a simple dictionary for now
+            if not hasattr(self, '_custom_metrics'):
+                self._custom_metrics = {}
+            
+            self._custom_metrics[metric_name] = {
+                'value': value,
+                'timestamp': datetime.now()
+            }
+            
+            self.logger.debug(f"Recorded metric {metric_name}: {value}")
+            
+        except Exception as e:
+            self.error_handler.handle_error(e, {'operation': 'record_metric', 'metric_name': metric_name})
+    
+    def get_metric(self, metric_name: str) -> Optional[float]:
+        """
+        Get a recorded metric value.
+        
+        Args:
+            metric_name: Name of the metric
+            
+        Returns:
+            Metric value or None if not found
+        """
+        try:
+            if hasattr(self, '_custom_metrics') and metric_name in self._custom_metrics:
+                return self._custom_metrics[metric_name]['value']
+            return None
+            
+        except Exception as e:
+            self.error_handler.handle_error(e, {'operation': 'get_metric', 'metric_name': metric_name})
+            return None
+    
     def check_api_service_health(self, service_name: str, test_func: callable) -> ServiceHealth:
         """Check health of an API service"""
         start_time = time.time()

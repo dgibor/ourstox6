@@ -1,315 +1,363 @@
-#!/usr/bin/env python3
 """
-Finnhub Financial Data Service
+Finnhub Service
+
+Modern Finnhub API service with rate limiting and error handling.
+Free tier: 60 API calls per minute.
 """
 
-from common_imports import (
-    os, time, logging, requests, pd, datetime, timedelta, 
-    psycopg2, DB_CONFIG, setup_logging, get_api_rate_limiter, safe_get_numeric
-)
-from typing import Dict, Optional, List, Any
+import logging
+import requests
+import time
+from typing import Dict, List, Optional, Any
+from datetime import datetime, timedelta
+import pandas as pd
+from dotenv import load_dotenv
+import os
 
-# Setup logging for this service
-setup_logging('finnhub')
+from database import DatabaseManager
+from error_handler import ErrorHandler
+
+# Load environment variables
+load_dotenv()
+
+logger = logging.getLogger(__name__)
+
 
 class FinnhubService:
-    def __init__(self):
+    """
+    Finnhub API service with intelligent rate limiting
+    
+    Features:
+    - 60 calls per minute rate limiting (free tier)
+    - Real-time pricing data
+    - Basic fundamental data
+    - Company profiles and news
+    - Automatic error handling and retries
+    """
+    
+    def __init__(self, db: Optional[DatabaseManager] = None):
+        self.db = db or DatabaseManager()
+        self.error_handler = ErrorHandler("finnhub_service")
+        self.service_name = "Finnhub"
+        self.logger = logging.getLogger("finnhub_service")
+        
+        # API configuration
         self.api_key = os.getenv('FINNHUB_API_KEY')
-        self.base_url = 'https://finnhub.io/api/v1'
-        self.api_limiter = get_api_rate_limiter()
-        self.conn = psycopg2.connect(**DB_CONFIG)
-        self.cur = self.conn.cursor()
-        self.max_retries = 3
-        self.base_delay = 1  # seconds
-
-    def fetch_financial_statements(self, ticker: str) -> Optional[Dict]:
-        """Fetch financial statements from Finnhub"""
+        self.base_url = "https://finnhub.io/api/v1"
+        
+        # Rate limiting (free tier)
+        self.calls_per_minute = 60
+        self.delay_between_requests = 1.0  # 60 seconds / 60 calls = 1 second
+        
+        # Track API usage
+        self.call_history = []
+        
+        if not self.api_key:
+            self.logger.warning("⚠️ Finnhub API key not found - service will be limited")
+        else:
+            self.logger.info("✅ Finnhub service initialized")
+    
+    def _check_rate_limit(self) -> bool:
+        """Check if we can make an API call within rate limits"""
+        now = datetime.now()
+        
+        # Check minute limit
+        minute_ago = now - timedelta(minutes=1)
+        recent_calls = [call for call in self.call_history if call > minute_ago]
+        
+        if len(recent_calls) >= self.calls_per_minute:
+            self.logger.warning(f"Minute limit reached ({self.calls_per_minute} calls/min)")
+            return False
+        
+        return True
+    
+    def _record_api_call(self):
+        """Record an API call for rate limiting"""
+        now = datetime.now()
+        self.call_history.append(now)
+        
+        # Keep only last hour of call history
+        hour_ago = now - timedelta(hours=1)
+        self.call_history = [call for call in self.call_history if call > hour_ago]
+    
+    def _wait_for_rate_limit(self):
+        """Wait if necessary to respect rate limits"""
+        if not self._check_rate_limit():
+            self.logger.info(f"Waiting {self.delay_between_requests} seconds for rate limit...")
+            time.sleep(self.delay_between_requests)
+    
+    def _make_request(self, endpoint: str, **params) -> Optional[Dict[str, Any]]:
+        """Make a rate-limited API request"""
+        if not self.api_key:
+            self.logger.error("No API key available")
+            return None
+        
+        self._wait_for_rate_limit()
+        
+        url = f"{self.base_url}/{endpoint}"
+        params['token'] = self.api_key
+        
         try:
-            # Check API limit
-            provider = 'finnhub'
-            endpoint = 'financials'
-            if not self.api_limiter.check_limit(provider, endpoint):
-                logging.warning(f"Finnhub API limit reached for {ticker}")
-                return None
-
-            # Fetch income statement
-            url = f"{self.base_url}/stock/financials-reported"
-            params = {
-                'symbol': ticker,
-                'token': self.api_key
-            }
-            
             response = requests.get(url, params=params, timeout=30)
-            self.api_limiter.record_call(provider, endpoint)
+            self._record_api_call()
             
             if response.status_code == 200:
                 data = response.json()
-                if data.get('data'):
-                    return self.parse_financial_data(ticker, data['data'])
-                else:
-                    logging.warning(f"No financial data available for {ticker} from Finnhub")
+                
+                # Check for API limit or error messages
+                if isinstance(data, dict) and 'error' in data:
+                    self.logger.error(f"API error: {data['error']}")
                     return None
+                
+                return data
             else:
-                logging.error(f"Finnhub API error for {ticker}: {response.status_code}")
+                self.logger.error(f"HTTP {response.status_code}: {response.text}")
                 return None
                 
         except Exception as e:
-            logging.error(f"Error fetching financial statements for {ticker}: {e}")
+            self.logger.error(f"API request failed: {e}")
             return None
-
-    def fetch_company_profile(self, ticker: str) -> Optional[Dict]:
-        """Fetch company profile from Finnhub"""
-        try:
-            provider = 'finnhub'
-            endpoint = 'profile'
-            if not self.api_limiter.check_limit(provider, endpoint):
-                logging.warning(f"Finnhub API limit reached for {ticker}")
-                return None
-
-            url = f"{self.base_url}/stock/profile2"
-            params = {
-                'symbol': ticker,
-                'token': self.api_key
-            }
+    
+    def get_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get current pricing data for a ticker
+        
+        Args:
+            ticker: Stock ticker symbol
             
-            response = requests.get(url, params=params, timeout=30)
-            self.api_limiter.record_call(provider, endpoint)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data:
-                    return self.parse_profile_data(ticker, data)
-                else:
-                    logging.warning(f"No profile data available for {ticker} from Finnhub")
-                    return None
-            else:
-                logging.error(f"Finnhub API error for {ticker}: {response.status_code}")
-                return None
-                
-        except Exception as e:
-            logging.error(f"Error fetching company profile for {ticker}: {e}")
-            return None
-
-    def parse_financial_data(self, ticker: str, data: List[Dict]) -> Optional[Dict]:
-        """Parse financial statement data from Finnhub"""
+        Returns:
+            Dict with pricing data or None if failed
+        """
         try:
+            self.logger.debug(f"Fetching pricing data for {ticker}")
+            
+            data = self._make_request('quote', symbol=ticker)
             if not data:
                 return None
             
-            # Get the most recent financial data
-            latest_data = data[0] if data else {}
+            # Finnhub quote response format
+            if 'c' not in data or data['c'] <= 0:
+                return None
             
-            financial_data = {
+            return {
                 'ticker': ticker,
+                'price': float(data['c']),  # Current price
+                'open': float(data.get('o', 0)),  # Open price
+                'high': float(data.get('h', 0)),  # High price
+                'low': float(data.get('l', 0)),   # Low price
+                'previous_close': float(data.get('pc', 0)),  # Previous close
+                'change': float(data.get('d', 0)),  # Change
+                'change_percent': float(data.get('dp', 0)),  # Change percent
+                'volume': int(data.get('v', 0)) if data.get('v') else 0,  # Volume (from daily data)
                 'data_source': 'finnhub',
-                'last_updated': datetime.now(),
-                'income_statement': {},
-                'balance_sheet': {},
-                'cash_flow': {}
+                'timestamp': datetime.now()
             }
-            
-            # Extract income statement data
-            income_data = latest_data.get('report', {})
-            financial_data['income_statement'] = {
-                'revenue': self.safe_get_numeric(income_data, 'revenue'),
-                'gross_profit': self.safe_get_numeric(income_data, 'grossProfit'),
-                'operating_income': self.safe_get_numeric(income_data, 'operatingIncome'),
-                'net_income': self.safe_get_numeric(income_data, 'netIncome'),
-                'ebitda': self.safe_get_numeric(income_data, 'ebitda'),
-                'fiscal_year': latest_data.get('year'),
-                'fiscal_quarter': latest_data.get('quarter'),
-                'ttm_periods': 1  # Finnhub provides annual data
-            }
-            
-            # Extract balance sheet data
-            balance_data = latest_data.get('report', {})
-            financial_data['balance_sheet'] = {
-                'total_assets': self.safe_get_numeric(balance_data, 'totalAssets'),
-                'total_debt': self.safe_get_numeric(balance_data, 'totalDebt'),
-                'total_equity': self.safe_get_numeric(balance_data, 'totalEquity'),
-                'cash_and_equivalents': self.safe_get_numeric(balance_data, 'cashAndCashEquivalents'),
-                'current_assets': self.safe_get_numeric(balance_data, 'totalCurrentAssets'),
-                'current_liabilities': self.safe_get_numeric(balance_data, 'totalCurrentLiabilities'),
-                'fiscal_year': latest_data.get('year')
-            }
-            
-            return financial_data
             
         except Exception as e:
-            logging.error(f"Error parsing financial data for {ticker}: {e}")
+            self.logger.error(f"Error fetching pricing data for {ticker}: {e}")
             return None
-
-    def parse_profile_data(self, ticker: str, data: Dict) -> Optional[Dict]:
-        """Parse company profile data from Finnhub"""
+    
+    def get_fundamental_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get basic fundamental data for a ticker
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Dict with fundamental data or None if failed
+        """
         try:
-            profile_data = {
+            self.logger.debug(f"Fetching fundamental data for {ticker}")
+            
+            # Get company profile
+            profile_data = self._make_request('stock/profile2', symbol=ticker)
+            if not profile_data:
+                return None
+            
+            # Get basic financials (annual)
+            financials_data = self._make_request('stock/metric', symbol=ticker, metric='all')
+            
+            fundamental_data = {
                 'ticker': ticker,
+                'company_name': profile_data.get('name'),
+                'industry': profile_data.get('finnhubIndustry'),
+                'country': profile_data.get('country'),
+                'currency': profile_data.get('currency'),
+                'exchange': profile_data.get('exchange'),
+                'market_cap': profile_data.get('marketCapitalization'),
+                'shares_outstanding': profile_data.get('shareOutstanding'),
+                'ipo_date': profile_data.get('ipo'),
+                'website': profile_data.get('weburl'),
+                'logo': profile_data.get('logo'),
                 'data_source': 'finnhub',
-                'last_updated': datetime.now(),
-                'market_data': {},
-                'ratios': {},
-                'per_share_metrics': {}
+                'timestamp': datetime.now()
             }
             
-            # Market data
-            profile_data['market_data'] = {
-                'market_cap': self.safe_get_numeric(data, 'marketCapitalization'),
-                'shares_outstanding': self.safe_get_numeric(data, 'shareOutstanding'),
-                'current_price': self.safe_get_numeric(data, 'ticker')
-            }
+            # Add financial metrics if available
+            if financials_data and 'metric' in financials_data:
+                metrics = financials_data['metric']
+                fundamental_data.update({
+                    'pe_ratio': self._safe_numeric(metrics.get('peBasicExclExtraTTM')),
+                    'pb_ratio': self._safe_numeric(metrics.get('pbQuarterly')),
+                    'ps_ratio': self._safe_numeric(metrics.get('psQuarterly')),
+                    'ev_ebitda': self._safe_numeric(metrics.get('evEbitdaTTM')),
+                    'profit_margin': self._safe_numeric(metrics.get('netProfitMarginTTM')),
+                    'operating_margin': self._safe_numeric(metrics.get('operatingMarginTTM')),
+                    'roe': self._safe_numeric(metrics.get('roeTTM')),
+                    'roa': self._safe_numeric(metrics.get('roaTTM')),
+                    'debt_to_equity': self._safe_numeric(metrics.get('totalDebtToEquity')),
+                    'current_ratio': self._safe_numeric(metrics.get('currentRatioQuarterly')),
+                    'quick_ratio': self._safe_numeric(metrics.get('quickRatioQuarterly')),
+                    'beta': self._safe_numeric(metrics.get('beta')),
+                })
             
-            # Key ratios (if available)
-            profile_data['ratios'] = {
-                'pe_ratio': self.safe_get_numeric(data, 'peRatio'),
-                'pb_ratio': self.safe_get_numeric(data, 'pbRatio'),
-                'ps_ratio': self.safe_get_numeric(data, 'psRatio'),
-                'debt_to_equity': self.safe_get_numeric(data, 'debtToEquity')
-            }
-            
-            # Per share metrics
-            profile_data['per_share_metrics'] = {
-                'eps_diluted': self.safe_get_numeric(data, 'eps'),
-                'book_value_per_share': self.safe_get_numeric(data, 'bookValue')
-            }
-            
-            return profile_data
+            return fundamental_data
             
         except Exception as e:
-            logging.error(f"Error parsing profile data for {ticker}: {e}")
+            self.logger.error(f"Error fetching fundamental data for {ticker}: {e}")
             return None
-
-    def safe_get_numeric(self, data: Dict, key: str) -> Optional[float]:
-        """Safely get numeric value from dictionary"""
+    
+    def get_batch_data(self, tickers: List[str], data_type: str = 'pricing') -> Dict[str, Dict[str, Any]]:
+        """
+        Get data for multiple tickers
+        
+        Args:
+            tickers: List of ticker symbols
+            data_type: 'pricing' or 'fundamentals'
+            
+        Returns:
+            Dict mapping ticker to data
+        """
+        results = {}
+        
+        self.logger.info(f"Processing {len(tickers)} tickers with Finnhub")
+        
+        for ticker in tickers:
+            try:
+                if data_type == 'pricing':
+                    data = self.get_data(ticker)
+                else:
+                    data = self.get_fundamental_data(ticker)
+                
+                if data:
+                    results[ticker] = data
+                    
+            except Exception as e:
+                self.logger.error(f"Error processing {ticker}: {e}")
+        
+        self.logger.info(f"Successfully processed {len(results)}/{len(tickers)} tickers")
+        return results
+    
+    def get_company_news(self, ticker: str, from_date: str = None, to_date: str = None) -> List[Dict[str, Any]]:
+        """
+        Get company news
+        
+        Args:
+            ticker: Stock ticker symbol
+            from_date: Start date (YYYY-MM-DD format)
+            to_date: End date (YYYY-MM-DD format)
+            
+        Returns:
+            List of news articles
+        """
         try:
-            value = data.get(key)
-            if value is not None and value != 'N/A' and value != '':
-                return float(value)
+            params = {'symbol': ticker}
+            
+            if from_date:
+                params['from'] = from_date
+            if to_date:
+                params['to'] = to_date
+            
+            data = self._make_request('company-news', **params)
+            
+            if data and isinstance(data, list):
+                return [{
+                    'headline': article.get('headline'),
+                    'summary': article.get('summary'),
+                    'url': article.get('url'),
+                    'datetime': datetime.fromtimestamp(article.get('datetime', 0)),
+                    'source': article.get('source'),
+                    'image': article.get('image')
+                } for article in data[:10]]  # Limit to 10 articles
+            
+            return []
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching news for {ticker}: {e}")
+            return []
+    
+    def _safe_numeric(self, value: Any) -> Optional[float]:
+        """Safely convert value to float"""
+        if value is None or value == 'None' or value == '-' or pd.isna(value):
             return None
+        
+        try:
+            return float(value)
         except (ValueError, TypeError):
             return None
-
-    def store_fundamental_data(self, ticker: str, financial_data: Dict, profile_data: Dict) -> bool:
-        """Store fundamental data in the database"""
-        try:
-            # Extract data
-            income = financial_data.get('income_statement', {}) if financial_data else {}
-            balance = financial_data.get('balance_sheet', {}) if financial_data else {}
-            market_data = profile_data.get('market_data', {}) if profile_data else {}
-            per_share = profile_data.get('per_share_metrics', {}) if profile_data else {}
-
-            # Update stocks table
-            update_data = {
-                'market_cap': market_data.get('market_cap'),
-                'shares_outstanding': market_data.get('shares_outstanding'),
-                'revenue_ttm': income.get('revenue'),
-                'net_income_ttm': income.get('net_income'),
-                'ebitda_ttm': income.get('ebitda'),
-                'diluted_eps_ttm': per_share.get('eps_diluted'),
-                'book_value_per_share': per_share.get('book_value_per_share'),
-                'total_debt': balance.get('total_debt'),
-                'shareholders_equity': balance.get('total_equity'),
-                'cash_and_equivalents': balance.get('cash_and_equivalents'),
-                'fundamentals_last_update': datetime.now()
-            }
-
-            # Filter out None values
-            update_data = {k: v for k, v in update_data.items() if v is not None}
-            
-            if update_data:
-                set_clause = ", ".join([f"{key} = %s" for key in update_data.keys()])
-                values = list(update_data.values()) + [ticker]
-
-                self.cur.execute(f"""
-                    UPDATE stocks 
-                    SET {set_clause}
-                    WHERE ticker = %s
-                """, tuple(values))
-
-            # Store in company_fundamentals table
-            if financial_data and financial_data.get('income_statement'):
-                income = financial_data['income_statement']
-                
-                self.cur.execute("""
-                    INSERT INTO company_fundamentals 
-                    (ticker, report_date, period_type, fiscal_year, fiscal_quarter,
-                     revenue, gross_profit, operating_income, net_income, ebitda,
-                     data_source, last_updated)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (ticker, report_date, period_type)
-                    DO UPDATE SET
-                        revenue = COALESCE(EXCLUDED.revenue, company_fundamentals.revenue),
-                        gross_profit = COALESCE(EXCLUDED.gross_profit, company_fundamentals.gross_profit),
-                        operating_income = COALESCE(EXCLUDED.operating_income, company_fundamentals.operating_income),
-                        net_income = COALESCE(EXCLUDED.net_income, company_fundamentals.net_income),
-                        ebitda = COALESCE(EXCLUDED.ebitda, company_fundamentals.ebitda),
-                        fiscal_year = EXCLUDED.fiscal_year,
-                        fiscal_quarter = EXCLUDED.fiscal_quarter,
-                        data_source = EXCLUDED.data_source,
-                        last_updated = CURRENT_TIMESTAMP
-                """, (
-                    ticker, datetime.now().date(), 'annual', income.get('fiscal_year'), income.get('fiscal_quarter'),
-                    income.get('revenue'), income.get('gross_profit'),
-                    income.get('operating_income'), income.get('net_income'),
-                    income.get('ebitda'), 'finnhub', datetime.now()
-                ))
-            
-            self.conn.commit()
-            logging.info(f"Successfully stored fundamental data for {ticker}")
-            return True
-            
-        except Exception as e:
-            logging.error(f"Error storing fundamental data for {ticker}: {e}")
-            self.conn.rollback()
-            return False
-
-    def get_fundamental_data(self, ticker: str) -> Optional[Dict]:
-        """Main method to fetch and store fundamental data"""
-        try:
-            # Fetch financial statements
-            financial_data = self.fetch_financial_statements(ticker)
-            
-            # Fetch company profile
-            profile_data = self.fetch_company_profile(ticker)
-            
-            # Store data if available
-            if financial_data or profile_data:
-                success = self.store_fundamental_data(ticker, financial_data, profile_data)
-                if success:
-                    return {
-                        'financial_data': financial_data,
-                        'profile_data': profile_data
-                    }
-            
-            return None
-            
-        except Exception as e:
-            logging.error(f"Error getting fundamental data for {ticker}: {e}")
-            return None
-
-    def close(self):
-        """Close database connections"""
-        if self.cur:
-            self.cur.close()
-        if self.conn:
-            self.conn.close()
-        if self.api_limiter:
-            self.api_limiter.close()
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--ticker', type=str, default='AAPL', help='Ticker symbol to fetch')
-    args = parser.parse_args()
     
-    service = FinnhubService()
-    test_ticker = args.ticker
-    result = service.get_fundamental_data(test_ticker)
-    if result:
-        print(f"Successfully fetched fundamental data for {test_ticker}")
-        if result.get('financial_data'):
-            print(f"Financial data keys: {list(result['financial_data'].keys())}")
-        if result.get('profile_data'):
-            print(f"Profile data keys: {list(result['profile_data'].keys())}")
-    else:
-        print(f"Failed to fetch fundamental data for {test_ticker}")
-    service.close() 
+    def check_service_health(self) -> bool:
+        """
+        Check if Finnhub service is available
+        
+        Returns:
+            True if service is healthy, False otherwise
+        """
+        try:
+            if not self.api_key:
+                self.logger.warning("⚠️ No API key - service not available")
+                return False
+            
+            # Test with a simple quote request
+            data = self.get_data("AAPL")
+            
+            if data and data.get('price'):
+                self.logger.info("✅ Finnhub service health check passed")
+                return True
+            else:
+                self.logger.warning("⚠️ Finnhub service health check failed - no data")
+                return False
+                
+        except Exception as e:
+            self.logger.error(f"❌ Finnhub service health check failed: {e}")
+            return False
+    
+    def get_service_info(self) -> Dict[str, Any]:
+        """
+        Get information about this service
+        
+        Returns:
+            Dict with service information
+        """
+        return {
+            'name': self.service_name,
+            'type': 'freemium',
+            'api_key_required': True,
+            'rate_limits': {
+                'requests_per_minute': self.calls_per_minute,
+                'daily_limit': None  # No daily limit on free tier
+            },
+            'capabilities': [
+                'real_time_pricing',
+                'basic_fundamental_data',
+                'company_profiles',
+                'financial_metrics',
+                'company_news'
+            ],
+            'data_types': [
+                'pricing',
+                'fundamentals',
+                'company_info',
+                'news'
+            ],
+            'coverage': [
+                'US_stocks',
+                'international_stocks',
+                'forex',
+                'crypto'
+            ],
+            'cost_per_call': 0.0,
+            'reliability_score': 0.80,
+            'batch_limit': 1  # No native batch support
+        } 

@@ -107,3 +107,11 @@ utility_functions/*.pyc
 
 # Add pre_filled_stocks/logos directory to .gitignore
 pre_filled_stocks/logos/ 
+
+# Archive directories - development history and QA artifacts
+daily_run/archive_*/
+daily_run/archive_legacy_files_*/
+daily_run/archive_non_essential_*/
+daily_run/archive_conflicting_pipelines/
+daily_run/archive_temp_files/
+daily_run/archive_2025_01_26/ 

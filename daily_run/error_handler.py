@@ -13,6 +13,9 @@ from functools import wraps
 from enum import Enum
 import json
 
+# Import proper exceptions from the dedicated exceptions module
+from exceptions import ServiceError, RateLimitError, DataNotFoundError, DatabaseError
+
 class ErrorSeverity(Enum):
     """Error severity levels"""
     LOW = "LOW"
@@ -29,19 +32,6 @@ class ErrorCategory(Enum):
     NETWORK_ERROR = "NETWORK_ERROR"
     CONFIGURATION_ERROR = "CONFIGURATION_ERROR"
     SYSTEM_ERROR = "SYSTEM_ERROR"
-
-class ServiceError(Exception):
-    """Base exception for service-related errors"""
-    def __init__(self, service: str, message: str, ticker: str = None, 
-                 severity: ErrorSeverity = ErrorSeverity.MEDIUM,
-                 category: ErrorCategory = ErrorCategory.SYSTEM_ERROR):
-        self.service = service
-        self.message = message
-        self.ticker = ticker
-        self.severity = severity
-        self.category = category
-        self.timestamp = datetime.now()
-        super().__init__(f"{service}: {message}")
 
 class ErrorHandler:
     """Centralized error handling and logging"""
@@ -65,8 +55,17 @@ class ErrorHandler:
         
         # Determine severity and category
         if isinstance(error, ServiceError):
-            severity = error.severity
-            category = error.category
+            severity = ErrorSeverity.MEDIUM
+            category = ErrorCategory.API_ERROR
+            if isinstance(error, RateLimitError):
+                severity = ErrorSeverity.LOW
+                category = ErrorCategory.RATE_LIMIT_ERROR
+            elif isinstance(error, DataNotFoundError):
+                severity = ErrorSeverity.LOW
+                category = ErrorCategory.DATA_VALIDATION_ERROR
+        elif isinstance(error, DatabaseError):
+            severity = ErrorSeverity.HIGH
+            category = ErrorCategory.DATABASE_ERROR
         else:
             severity, category = self._classify_error(error)
         

@@ -1,0 +1,73 @@
+---
+description: 
+globs: **/*.py
+alwaysApply: false
+---
+Description: "Defines snake_case naming convention, batch processing policy, API quota logging, and file limits for this project."
+
+**Project Rules**
+
+1. **Code Style & Naming**
+
+   * Use `snake_case` for all variables, functions, file names, and folders.
+   * File names must match the main function or class inside (e.g., `process_data.py`).
+   * Avoid `camelCase` and `PascalCase` unless required by a third-party library.
+   * Constants should be in uppercase with underscores (e.g., `MAX_BATCH_SIZE`).
+
+2. **Project Structure**
+
+   * Organize code by **feature**, not by file type.
+   * Use folders like `services/`, `utils/`, `data/`, `tests/`, and `config/`.
+   * Keep files under 100 lines. Split logic across multiple files if needed.
+
+3. **Batch Processing**
+
+   * Use batch operations for all external API calls and large data processing.
+   * Define and reuse a global `BATCH_SIZE` constant.
+   * Handle rate limits gracefully using retries or backoff strategies.
+
+4. **API Usage Monitoring**
+
+   * Wrap all API calls in a function that logs usage and counts requests.
+   * Store API usage logs in `api_usage_log.json` or a lightweight database.
+   * Alert when usage nears free-tier limits with warnings in logs or console.
+
+5. **Documentation**
+
+   * Every function and class must include a docstring with description, parameters, and return value.
+   * Maintain a `README.md` explaining project structure, main files, and how to run the code.
+   * Place additional documentation or diagrams in the `docs/` folder.
+
+6. **Testing & QA**
+
+   * All major functions must include unit tests in the `tests/` folder.
+   * Tests must include edge cases, expected failures, and normal behavior.
+   * Use `pytest` or native testing tools and track coverage.
+
+7. **Error Handling**
+
+   * Never suppress errors silently.
+   * Wrap external calls with try/except blocks, log exceptions, and raise meaningful errors when needed.
+   * Use centralized error handling for reusable patterns.
+
+8. **Performance**
+
+   * Minimize redundant I/O or repeated calculations.
+   * Use async functions for I/O-bound tasks (e.g., API calls, file access).
+   * Cache repeated results where it improves performance.
+
+9. **Security**
+
+   * Store all credentials and secrets in environment variables.
+   * Never commit `.env` or secret keys to version control.
+   * Sanitize and validate all external input.
+
+10. **Version Control & Commits**
+
+* Use conventional commit messages like:
+  `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`
+* Exclude all generated files, logs, and `.env` from Git using `.gitignore`.
+* Commit often with meaningful summaries.
+
+
+

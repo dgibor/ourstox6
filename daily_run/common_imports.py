@@ -145,7 +145,6 @@ try:
     from yahoo_finance_service import YahooFinanceService
     from alpha_vantage_service import AlphaVantageService
     from finnhub_service import FinnhubService
-    from fmp_service import FMPService
 except ImportError as e:
     logging.warning(f"Some service imports failed: {e}")
     # Create placeholder classes if imports fail
@@ -154,6 +153,4 @@ except ImportError as e:
     class AlphaVantageService:
         def __init__(self): pass
     class FinnhubService:
-        def __init__(self): pass
-    class FMPService:
         def __init__(self): pass 

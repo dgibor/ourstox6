@@ -5,6 +5,7 @@ Base service class for all API services
 
 import logging
 import time
+import requests
 from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
 from ratelimit import limits, sleep_and_retry
@@ -23,6 +24,60 @@ class BaseService(ABC):
         
         if not self.api_key:
             self.logger.warning(f"No API key found for {service_name}")
+    
+    def _make_request(self, url: str, params: Dict[str, Any] = None, headers: Dict[str, str] = None) -> Dict[str, Any]:
+        """
+        Make HTTP request with error handling and rate limiting.
+        
+        Args:
+            url: Request URL
+            params: Query parameters
+            headers: Request headers
+            
+        Returns:
+            Response data as dictionary
+            
+        Raises:
+            RateLimitError: If rate limit is exceeded
+            ServiceError: If request fails
+        """
+        try:
+            # Add default headers if not provided
+            if headers is None:
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            
+            # Make request
+            response = requests.get(url, params=params, headers=headers, timeout=30)
+            
+            # Check for rate limiting
+            if response.status_code == 429:
+                raise RateLimitError(self.service_name, "Rate limit exceeded")
+            
+            # Check for other errors
+            if response.status_code != 200:
+                raise ServiceError(self.service_name, f"HTTP {response.status_code}: {response.text}")
+            
+            # Parse JSON response
+            data = response.json()
+            
+            # Check for API-specific error indicators
+            if 'error' in data:
+                error_msg = data.get('error', 'Unknown error')
+                if 'rate limit' in error_msg.lower() or 'quota' in error_msg.lower():
+                    raise RateLimitError(self.service_name, error_msg)
+                else:
+                    raise ServiceError(self.service_name, error_msg)
+            
+            return data
+            
+        except requests.exceptions.Timeout:
+            raise ServiceError(self.service_name, "Request timeout")
+        except requests.exceptions.RequestException as e:
+            raise ServiceError(self.service_name, f"Request failed: {str(e)}")
+        except ValueError as e:
+            raise ServiceError(self.service_name, f"Invalid JSON response: {str(e)}")
     
     @abstractmethod
     def get_data(self, ticker: str) -> Optional[Dict[str, Any]]:

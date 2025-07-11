@@ -1,418 +1,459 @@
-#!/usr/bin/env python3
 """
-Yahoo Finance Financial Data Service
+Yahoo Finance Service
+
+Free, reliable service for both pricing and fundamental data.
+No API key required - always available as primary service.
 """
 
-from common_imports import (
-    os, time, logging, requests, pd, datetime, timedelta, 
-    psycopg2, DB_CONFIG, setup_logging, get_api_rate_limiter, safe_get_numeric, safe_get_value
-)
+import logging
 import yfinance as yf
-from typing import Dict, Optional, List, Any
-import argparse
+import pandas as pd
+from typing import Dict, List, Optional, Any
+from datetime import datetime, date
+import requests
+from dataclasses import dataclass
 
-# Setup logging for this service
-setup_logging('yahoo_finance')
+from database import DatabaseManager
+from error_handler import ErrorHandler
 
-YAHOO_ENDPOINTS = {
-    'financials': '/v1/finance/financials',
-    'key_statistics': '/v11/finance/quoteSummary',
-    'balance_sheet': '/v1/finance/balance_sheet',
-    'cash_flow': '/v1/finance/cash_flow'
-}
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class YahooDataResult:
+    """Result from Yahoo Finance data fetch"""
+    success: bool
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    source: str = 'yahoo'
+
 
 class YahooFinanceService:
-    def __init__(self):
-        self.api_limiter = get_api_rate_limiter()
-        self.conn = psycopg2.connect(**DB_CONFIG)
-        self.cur = self.conn.cursor()
-        self.max_retries = 3
-        self.base_delay = 2  # seconds
-
-    def fetch_financial_statements(self, ticker: str) -> Optional[Dict]:
-        """Fetch financial statements from Yahoo Finance with exponential backoff on rate limit"""
-        max_retries = 3
-        wait_times = [2, 4, 8]
-        for attempt in range(max_retries):
-            try:
-                # Check API limit before making request
-                provider = 'yahoo'
-                endpoint = 'financials'
-                if not self.api_limiter.check_limit(provider, endpoint):
-                    logging.warning(f"Yahoo Finance API limit reached for {ticker}")
-                    return None
-
-                # Fetch data using yfinance
-                stock = yf.Ticker(ticker)
-                
-                # Get financial statements
-                income_stmt = stock.financials
-                balance_sheet = stock.balance_sheet
-                cash_flow = stock.cashflow
-                
-                # Record API call
-                self.api_limiter.record_call(provider, endpoint)
-                
-                # Parse and standardize data
-                financial_data = self.parse_financial_data(ticker, income_stmt, balance_sheet, cash_flow)
-                
-                if financial_data:
-                    logging.info(f"Successfully fetched financial data for {ticker}")
-                    return financial_data
-                else:
-                    logging.warning(f"No financial data available for {ticker}")
-                    return None
-                    
-            except Exception as e:
-                if 'rate limit' in str(e).lower() or 'too many requests' in str(e).lower():
-                    if attempt < max_retries - 1:
-                        logging.warning(f"Rate limited for {ticker}, retrying in {wait_times[attempt]}s...")
-                        time.sleep(wait_times[attempt])
-                        continue
-                logging.error(f"Error fetching financial statements for {ticker}: {e}")
-                break
+    """
+    Yahoo Finance service for pricing and fundamental data.
+    
+    Features:
+    - Free service, no API key required
+    - Comprehensive pricing data (real-time and historical)
+    - Full fundamental data (financial statements, ratios)
+    - Batch processing capability (up to 100 symbols)
+    - Global coverage (stocks, ETFs, options, forex)
+    """
+    
+    def __init__(self, db: Optional[DatabaseManager] = None):
+        self.db = db or DatabaseManager()
+        self.error_handler = ErrorHandler("yahoo_finance_service")
+        self.service_name = "Yahoo Finance"
+        self.logger = logging.getLogger("yahoo_finance_service")
         
-        return None
-
-    def fetch_key_statistics(self, ticker: str) -> Optional[Dict]:
-        """Fetch key statistics from Yahoo Finance with exponential backoff on rate limit"""
-        max_retries = 3
-        wait_times = [2, 4, 8]
-        for attempt in range(max_retries):
-            try:
-                provider = 'yahoo'
-                endpoint = 'key_statistics'
-                if not self.api_limiter.check_limit(provider, endpoint):
-                    logging.warning(f"Yahoo Finance API limit reached for {ticker}")
-                    return None
-
-                stock = yf.Ticker(ticker)
-                
-                # Get key statistics
-                info = stock.info
-                
-                # Record API call
-                self.api_limiter.record_call(provider, endpoint)
-                
-                # Parse key statistics
-                key_stats = self.parse_key_statistics(ticker, info)
-                
-                if key_stats:
-                    logging.info(f"Successfully fetched key statistics for {ticker}")
-                    return key_stats
-                else:
-                    logging.warning(f"No key statistics available for {ticker}")
-                    return None
-                    
-            except Exception as e:
-                if 'rate limit' in str(e).lower() or 'too many requests' in str(e).lower():
-                    if attempt < max_retries - 1:
-                        logging.warning(f"Rate limited for {ticker}, retrying in {wait_times[attempt]}s...")
-                        time.sleep(wait_times[attempt])
-                        continue
-                logging.error(f"Error fetching key statistics for {ticker}: {e}")
-                break
+        # No API key required for Yahoo Finance
+        self.api_key = None
+        self.base_url = "https://query1.finance.yahoo.com"
         
-        return None
-
-    def parse_financial_data(self, ticker: str, income_stmt: pd.DataFrame, 
-                           balance_sheet: pd.DataFrame, cash_flow: pd.DataFrame) -> Optional[Dict]:
-        """Parse and standardize financial statement data"""
+        # Rate limiting (Yahoo is free but we should be respectful)
+        self.max_requests_per_minute = 60  # Conservative limit
+        self.delay_between_requests = 1.0  # 1 second between requests
+        
+        self.logger.info("✅ Yahoo Finance service initialized (free, no API key required)")
+    
+    def get_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get current pricing data for a ticker
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Dict with pricing data or None if failed
+        """
         try:
-            financial_data = {
+            self.logger.debug(f"Fetching pricing data for {ticker}")
+            
+            # Use yfinance to get current data
+            stock = yf.Ticker(ticker)
+            hist = stock.history(period="1d")
+            
+            if hist.empty:
+                self.logger.warning(f"No pricing data found for {ticker}")
+                return None
+            
+            latest = hist.iloc[-1]
+            info = stock.info
+            
+            return {
                 'ticker': ticker,
+                'price': float(latest['Close']),
+                'open': float(latest['Open']),
+                'high': float(latest['High']),
+                'low': float(latest['Low']),
+                'volume': int(latest['Volume']) if pd.notna(latest['Volume']) else 0,
+                'market_cap': info.get('marketCap'),
+                'change': info.get('regularMarketChange', 0),
+                'change_percent': info.get('regularMarketChangePercent', 0),
                 'data_source': 'yahoo',
-                'last_updated': datetime.now(),
-                'income_statement': {},
-                'balance_sheet': {},
-                'cash_flow': {}
+                'timestamp': datetime.now(),
+                'currency': info.get('currency', 'USD')
             }
-            
-            # Parse income statement and calculate TTM
-            if not income_stmt.empty:
-                # Get the last 4 quarters for TTM calculation
-                columns = list(income_stmt.columns)
-                if len(columns) >= 4:
-                    ttm_columns = columns[:4]  # Last 4 quarters
-                else:
-                    ttm_columns = columns  # Use all available quarters
-                
-                # Calculate TTM values
-                ttm_revenue = sum(self.safe_get_value(income_stmt, 'Total Revenue', col) or 0 for col in ttm_columns)
-                ttm_gross_profit = sum(self.safe_get_value(income_stmt, 'Gross Profit', col) or 0 for col in ttm_columns)
-                ttm_operating_income = sum(self.safe_get_value(income_stmt, 'Operating Income', col) or 0 for col in ttm_columns)
-                ttm_net_income = sum(self.safe_get_value(income_stmt, 'Net Income', col) or 0 for col in ttm_columns)
-                ttm_ebitda = sum(self.safe_get_value(income_stmt, 'EBITDA', col) or 0 for col in ttm_columns)
-                
-                # Also get annual data for comparison
-                latest_year = income_stmt.columns[0]
-                financial_data['income_statement'] = {
-                    'revenue': ttm_revenue,  # Use TTM instead of annual
-                    'revenue_annual': self.safe_get_value(income_stmt, 'Total Revenue', latest_year),
-                    'gross_profit': ttm_gross_profit,
-                    'operating_income': ttm_operating_income,
-                    'net_income': ttm_net_income,
-                    'ebitda': ttm_ebitda,
-                    'fiscal_year': latest_year.year,
-                    'ttm_periods': len(ttm_columns)
-                }
-            else:
-                # Fallback to annual data if no quarterly data
-                latest_year = income_stmt.columns[0] if not income_stmt.empty else None
-                if latest_year:
-                    financial_data['income_statement'] = {
-                        'revenue': self.safe_get_value(income_stmt, 'Total Revenue', latest_year),
-                        'gross_profit': self.safe_get_value(income_stmt, 'Gross Profit', latest_year),
-                        'operating_income': self.safe_get_value(income_stmt, 'Operating Income', latest_year),
-                        'net_income': self.safe_get_value(income_stmt, 'Net Income', latest_year),
-                        'ebitda': self.safe_get_value(income_stmt, 'EBITDA', latest_year),
-                        'fiscal_year': latest_year.year,
-                        'ttm_periods': 1
-                    }
-            
-            # Parse balance sheet
-            if not balance_sheet.empty:
-                latest_year = balance_sheet.columns[0]
-                financial_data['balance_sheet'] = {
-                    'total_assets': self.safe_get_value(balance_sheet, 'Total Assets', latest_year),
-                    'total_debt': self.safe_get_value(balance_sheet, 'Total Debt', latest_year),
-                    'total_equity': self.safe_get_value(balance_sheet, 'Total Stockholder Equity', latest_year),
-                    'cash_and_equivalents': self.safe_get_value(balance_sheet, 'Cash And Cash Equivalents', latest_year),
-                    'current_assets': self.safe_get_value(balance_sheet, 'Total Current Assets', latest_year),
-                    'current_liabilities': self.safe_get_value(balance_sheet, 'Total Current Liabilities', latest_year),
-                    'fiscal_year': latest_year.year
-                }
-            
-            # Parse cash flow
-            if not cash_flow.empty:
-                latest_year = cash_flow.columns[0]
-                financial_data['cash_flow'] = {
-                    'operating_cash_flow': self.safe_get_value(cash_flow, 'Operating Cash Flow', latest_year),
-                    'free_cash_flow': self.safe_get_value(cash_flow, 'Free Cash Flow', latest_year),
-                    'capex': self.safe_get_value(cash_flow, 'Capital Expenditure', latest_year),
-                    'fiscal_year': latest_year.year
-                }
-            
-            return financial_data
             
         except Exception as e:
-            logging.error(f"Error parsing financial data for {ticker}: {e}")
+            self.logger.error(f"Error fetching pricing data for {ticker}: {e}")
             return None
-
-    def parse_key_statistics(self, ticker: str, info: Dict) -> Optional[Dict]:
-        """Parse key statistics and ratios"""
+    
+    def get_fundamental_data(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get fundamental data for a ticker
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Dict with fundamental data or None if failed
+        """
         try:
+            self.logger.debug(f"Fetching fundamental data for {ticker}")
+            
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            if not info:
+                self.logger.warning(f"No fundamental data found for {ticker}")
+                return None
+            
+            # Get financial statements
+            financials = stock.financials
+            balance_sheet = stock.balance_sheet
+            cash_flow = stock.cashflow
+            
+            # Extract key fundamental metrics
+            fundamental_data = {
+                'ticker': ticker,
+                'market_cap': info.get('marketCap'),
+                'revenue_ttm': info.get('totalRevenue'),
+                'net_income_ttm': info.get('netIncomeToCommon'),
+                'total_debt': info.get('totalDebt'),
+                'total_cash': info.get('totalCash'),
+                'book_value': info.get('bookValue'),
+                'shares_outstanding': info.get('sharesOutstanding'),
+                'pe_ratio': info.get('trailingPE'),
+                'pb_ratio': info.get('priceToBook'),
+                'ps_ratio': info.get('priceToSalesTrailing12Months'),
+                'debt_to_equity': info.get('debtToEquity'),
+                'roe': info.get('returnOnEquity'),
+                'roa': info.get('returnOnAssets'),
+                'profit_margin': info.get('profitMargins'),
+                'operating_margin': info.get('operatingMargins'),
+                'gross_margin': info.get('grossMargins'),
+                'dividend_yield': info.get('dividendYield'),
+                'peg_ratio': info.get('pegRatio'),
+                'beta': info.get('beta'),
+                'enterprise_value': info.get('enterpriseValue'),
+                'ev_revenue': info.get('enterpriseToRevenue'),
+                'ev_ebitda': info.get('enterpriseToEbitda'),
+                'current_ratio': info.get('currentRatio'),
+                'quick_ratio': info.get('quickRatio'),
+                'data_source': 'yahoo',
+                'timestamp': datetime.now()
+            }
+            
+            # Clean None values and convert to proper types
+            cleaned_data = {}
+            for key, value in fundamental_data.items():
+                if value is not None and pd.notna(value):
+                    if isinstance(value, (int, float)) and not pd.isinf(value):
+                        cleaned_data[key] = float(value)
+                    else:
+                        cleaned_data[key] = value
+                else:
+                    cleaned_data[key] = None
+            
+            return cleaned_data
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching fundamental data for {ticker}: {e}")
+            return None
+    
+    def get_batch_data(self, tickers: List[str], data_type: str = 'pricing') -> Dict[str, Dict[str, Any]]:
+        """
+        Get data for multiple tickers in batch
+        
+        Args:
+            tickers: List of ticker symbols (up to 100)
+            data_type: 'pricing' or 'fundamentals'
+            
+        Returns:
+            Dict mapping ticker to data
+        """
+        results = {}
+        
+        if len(tickers) > 100:
+            self.logger.warning(f"Too many tickers ({len(tickers)}), limiting to first 100")
+            tickers = tickers[:100]
+        
+        self.logger.info(f"Fetching {data_type} data for {len(tickers)} tickers")
+        
+        if data_type == 'pricing':
+            # Yahoo Finance supports batch pricing requests
+            try:
+                # Use yfinance download for batch pricing
+                data = yf.download(' '.join(tickers), period="1d", group_by='ticker', progress=False)
+                
+                for ticker in tickers:
+                    try:
+                        if ticker in data.columns.levels[0]:
+                            ticker_data = data[ticker].iloc[-1]
+                            
+                            if not ticker_data.isna().all():
+                                results[ticker] = {
+                                    'ticker': ticker,
+                                    'price': float(ticker_data['Close']),
+                                    'open': float(ticker_data['Open']),
+                                    'high': float(ticker_data['High']),
+                                    'low': float(ticker_data['Low']),
+                                    'volume': int(ticker_data['Volume']) if pd.notna(ticker_data['Volume']) else 0,
+                                    'data_source': 'yahoo',
+                                    'timestamp': datetime.now()
+                                }
+                    except Exception as e:
+                        self.logger.warning(f"Error processing batch data for {ticker}: {e}")
+                        
+            except Exception as e:
+                self.logger.error(f"Batch pricing request failed: {e}")
+                # Fallback to individual requests
+                for ticker in tickers:
+                    data = self.get_data(ticker)
+                    if data:
+                        results[ticker] = data
+        
+        else:  # fundamentals
+            # Fundamental data requires individual requests
+            for ticker in tickers:
+                data = self.get_fundamental_data(ticker)
+                if data:
+                    results[ticker] = data
+        
+        self.logger.info(f"Successfully fetched data for {len(results)}/{len(tickers)} tickers")
+        return results
+    
+    def store_fundamental_data(self, ticker: str, financial_data: Dict, key_stats: Dict = None) -> bool:
+        """
+        Store fundamental data in database
+        
+        Args:
+            ticker: Stock ticker symbol
+            financial_data: Financial data dict
+            key_stats: Additional key statistics
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Combine financial data and key stats
+            if key_stats:
+                financial_data.update(key_stats)
+            
+            # Store in company_fundamentals table
+            sql = """
+            INSERT INTO company_fundamentals (
+                ticker, market_cap, revenue_ttm, net_income_ttm, total_debt,
+                total_cash, book_value, shares_outstanding, pe_ratio, pb_ratio,
+                ps_ratio, debt_to_equity, roe, roa, profit_margin, operating_margin,
+                gross_margin, dividend_yield, peg_ratio, beta, enterprise_value,
+                ev_revenue, ev_ebitda, current_ratio, quick_ratio, data_source,
+                last_updated
+            ) VALUES (
+                %(ticker)s, %(market_cap)s, %(revenue_ttm)s, %(net_income_ttm)s,
+                %(total_debt)s, %(total_cash)s, %(book_value)s, %(shares_outstanding)s,
+                %(pe_ratio)s, %(pb_ratio)s, %(ps_ratio)s, %(debt_to_equity)s,
+                %(roe)s, %(roa)s, %(profit_margin)s, %(operating_margin)s,
+                %(gross_margin)s, %(dividend_yield)s, %(peg_ratio)s, %(beta)s,
+                %(enterprise_value)s, %(ev_revenue)s, %(ev_ebitda)s, %(current_ratio)s,
+                %(quick_ratio)s, %(data_source)s, %(timestamp)s
+            )
+            ON DUPLICATE KEY UPDATE
+                market_cap = VALUES(market_cap),
+                revenue_ttm = VALUES(revenue_ttm),
+                net_income_ttm = VALUES(net_income_ttm),
+                total_debt = VALUES(total_debt),
+                total_cash = VALUES(total_cash),
+                book_value = VALUES(book_value),
+                shares_outstanding = VALUES(shares_outstanding),
+                pe_ratio = VALUES(pe_ratio),
+                pb_ratio = VALUES(pb_ratio),
+                ps_ratio = VALUES(ps_ratio),
+                debt_to_equity = VALUES(debt_to_equity),
+                roe = VALUES(roe),
+                roa = VALUES(roa),
+                profit_margin = VALUES(profit_margin),
+                operating_margin = VALUES(operating_margin),
+                gross_margin = VALUES(gross_margin),
+                dividend_yield = VALUES(dividend_yield),
+                peg_ratio = VALUES(peg_ratio),
+                beta = VALUES(beta),
+                enterprise_value = VALUES(enterprise_value),
+                ev_revenue = VALUES(ev_revenue),
+                ev_ebitda = VALUES(ev_ebitda),
+                current_ratio = VALUES(current_ratio),
+                quick_ratio = VALUES(quick_ratio),
+                data_source = VALUES(data_source),
+                last_updated = VALUES(last_updated)
+            """
+            
+            # Prepare data for database
+            db_data = financial_data.copy()
+            db_data['last_updated'] = db_data.get('timestamp', datetime.now())
+            
+            self.db.execute_query(sql, db_data)
+            self.logger.info(f"Successfully stored fundamental data for {ticker}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error storing fundamental data for {ticker}: {e}")
+            return False
+    
+    def fetch_financial_statements(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch complete financial statements for a ticker
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Dict with financial statements or None if failed
+        """
+        try:
+            stock = yf.Ticker(ticker)
+            
+            # Get all financial data
+            financials = stock.financials
+            balance_sheet = stock.balance_sheet
+            cash_flow = stock.cashflow
+            info = stock.info
+            
+            statements = {
+                'ticker': ticker,
+                'income_statement': financials.to_dict() if not financials.empty else {},
+                'balance_sheet': balance_sheet.to_dict() if not balance_sheet.empty else {},
+                'cash_flow': cash_flow.to_dict() if not cash_flow.empty else {},
+                'key_metrics': info,
+                'data_source': 'yahoo',
+                'timestamp': datetime.now()
+            }
+            
+            return statements
+            
+        except Exception as e:
+            self.logger.error(f"Error fetching financial statements for {ticker}: {e}")
+            return None
+    
+    def fetch_key_statistics(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch key statistics for a ticker
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Dict with key statistics or None if failed
+        """
+        try:
+            stock = yf.Ticker(ticker)
+            info = stock.info
+            
+            if not info:
+                return None
+            
+            # Extract key statistics
             key_stats = {
                 'ticker': ticker,
+                'trailing_pe': info.get('trailingPE'),
+                'forward_pe': info.get('forwardPE'),
+                'price_to_book': info.get('priceToBook'),
+                'price_to_sales': info.get('priceToSalesTrailing12Months'),
+                'enterprise_value': info.get('enterpriseValue'),
+                'profit_margins': info.get('profitMargins'),
+                'operating_margins': info.get('operatingMargins'),
+                'return_on_assets': info.get('returnOnAssets'),
+                'return_on_equity': info.get('returnOnEquity'),
+                'revenue_growth': info.get('revenueGrowth'),
+                'earnings_growth': info.get('earningsGrowth'),
+                'current_ratio': info.get('currentRatio'),
+                'quick_ratio': info.get('quickRatio'),
+                'debt_to_equity': info.get('debtToEquity'),
+                'gross_margins': info.get('grossMargins'),
+                'ebitda_margins': info.get('ebitdaMargins'),
                 'data_source': 'yahoo',
-                'last_updated': datetime.now(),
-                'market_data': {},
-                'ratios': {},
-                'per_share_metrics': {}
-            }
-            
-            # Market data
-            key_stats['market_data'] = {
-                'market_cap': self.safe_get_numeric(info, 'marketCap'),
-                'enterprise_value': self.safe_get_numeric(info, 'enterpriseValue'),
-                'shares_outstanding': self.safe_get_numeric(info, 'sharesOutstanding'),
-                'shares_float': self.safe_get_numeric(info, 'floatShares'),
-                'current_price': self.safe_get_numeric(info, 'currentPrice')
-            }
-            
-            # Key ratios
-            key_stats['ratios'] = {
-                'pe_ratio': self.safe_get_numeric(info, 'trailingPE'),
-                'pb_ratio': self.safe_get_numeric(info, 'priceToBook'),
-                'ps_ratio': self.safe_get_numeric(info, 'priceToSalesTrailing12Months'),
-                'ev_ebitda': self.safe_get_numeric(info, 'enterpriseToEbitda'),
-                'peg_ratio': self.safe_get_numeric(info, 'pegRatio'),
-                'roe': self.safe_get_numeric(info, 'returnOnEquity'),
-                'roa': self.safe_get_numeric(info, 'returnOnAssets'),
-                'debt_to_equity': self.safe_get_numeric(info, 'debtToEquity'),
-                'current_ratio': self.safe_get_numeric(info, 'currentRatio'),
-                'quick_ratio': self.safe_get_numeric(info, 'quickRatio'),
-                'gross_margin': self.safe_get_numeric(info, 'grossMargins'),
-                'operating_margin': self.safe_get_numeric(info, 'operatingMargins'),
-                'net_margin': self.safe_get_numeric(info, 'profitMargins')
-            }
-            
-            # Per share metrics
-            key_stats['per_share_metrics'] = {
-                'eps_diluted': self.safe_get_numeric(info, 'trailingEps'),
-                'book_value_per_share': self.safe_get_numeric(info, 'bookValue'),
-                'cash_per_share': self.safe_get_numeric(info, 'totalCashPerShare'),
-                'revenue_per_share': self.safe_get_numeric(info, 'revenuePerShare')
+                'timestamp': datetime.now()
             }
             
             return key_stats
             
         except Exception as e:
-            logging.error(f"Error parsing key statistics for {ticker}: {e}")
+            self.logger.error(f"Error fetching key statistics for {ticker}: {e}")
             return None
-
-    def safe_get_value(self, df: pd.DataFrame, row_name: str, column) -> Optional[float]:
-        """Safely get value from DataFrame with error handling"""
+    
+    def check_service_health(self) -> bool:
+        """
+        Check if Yahoo Finance service is available
+        
+        Returns:
+            True if service is healthy, False otherwise
+        """
         try:
-            if row_name in df.index:
-                value = df.loc[row_name, column]
-                if pd.notna(value):
-                    return float(value)
-            return None
-        except Exception as e:
-            logging.debug(f"Error getting {row_name}: {e}")
-            return None
-
-    def safe_get_numeric(self, data: Dict, key: str) -> Optional[float]:
-        """Safely get numeric value from dictionary with error handling"""
-        try:
-            value = data.get(key)
-            if value is not None and value != 'N/A':
-                return float(value)
-            return None
-        except (ValueError, TypeError) as e:
-            logging.debug(f"Error converting {key} to numeric: {e}")
-            return None
-
-    def store_fundamental_data(self, ticker: str, financial_data: Dict, key_stats: Dict) -> bool:
-        """Store comprehensive fundamental data in the database"""
-        try:
-            # Extract data from financial_data and key_stats for insertion
-            income = financial_data.get('income_statement', {}) if financial_data else {}
-            balance = financial_data.get('balance_sheet', {}) if financial_data else {}
-            cash_flow = financial_data.get('cash_flow', {}) if financial_data else {}
-            market_data = key_stats.get('market_data', {}) if key_stats else {}
-            per_share = key_stats.get('per_share_metrics', {}) if key_stats else {}
-
-            # Prepare a dictionary of all columns to update in the 'stocks' table
-            update_data = {
-                'market_cap': market_data.get('market_cap'),
-                'enterprise_value': market_data.get('enterprise_value'),
-                'shares_outstanding': market_data.get('shares_outstanding'),
-                'revenue_ttm': income.get('revenue'),
-                'net_income_ttm': income.get('net_income'),
-                'ebitda_ttm': income.get('ebitda'),
-                'diluted_eps_ttm': per_share.get('eps_diluted'),
-                'book_value_per_share': per_share.get('book_value_per_share'),
-                'total_debt': balance.get('total_debt'),
-                'shareholders_equity': balance.get('total_equity'),
-                'cash_and_equivalents': balance.get('cash_and_equivalents'),
-                'fundamentals_last_update': datetime.now()
-            }
-
-            # Log TTM calculations for debugging
-            if income.get('revenue'):
-                logging.info(f"{ticker} TTM Revenue: ${income.get('revenue'):,.0f} (from {income.get('ttm_periods', 1)} periods)")
-                if income.get('revenue_annual'):
-                    logging.info(f"{ticker} Annual Revenue: ${income.get('revenue_annual'):,.0f}")
-            if income.get('net_income'):
-                logging.info(f"{ticker} TTM Net Income: ${income.get('net_income'):,.0f}")
-            if income.get('ebitda'):
-                logging.info(f"{ticker} TTM EBITDA: ${income.get('ebitda'):,.0f}")
-
-            # Filter out None values to avoid overwriting existing data with NULL
-            update_data = {k: v for k, v in update_data.items() if v is not None}
+            # Test with a known good ticker
+            test_ticker = "AAPL"
+            data = self.get_data(test_ticker)
             
-            if not update_data:
-                logging.warning(f"No new data to update for {ticker}")
+            if data and data.get('price'):
+                self.logger.info("✅ Yahoo Finance service health check passed")
+                return True
+            else:
+                self.logger.warning("⚠️ Yahoo Finance service health check failed - no data")
                 return False
-
-            # Build the SET part of the SQL query dynamically
-            set_clause = ", ".join([f"{key} = %s" for key in update_data.keys()])
-            values = list(update_data.values()) + [ticker]
-
-            # Execute the update query
-            self.cur.execute(f"""
-                UPDATE stocks 
-                SET {set_clause}
-                WHERE ticker = %s
-            """, tuple(values))
-
-            # Store in company_fundamentals table
-            if financial_data and financial_data.get('income_statement'):
-                income = financial_data['income_statement']
-                balance = financial_data.get('balance_sheet', {})
-                cash = financial_data.get('cash_flow', {})
                 
-                self.cur.execute("""
-                    INSERT INTO company_fundamentals 
-                    (ticker, report_date, period_type, fiscal_year, fiscal_quarter,
-                     revenue, gross_profit, operating_income, net_income, ebitda,
-                     data_source, last_updated)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (ticker, report_date, period_type)
-                    DO UPDATE SET
-                        revenue = COALESCE(EXCLUDED.revenue, company_fundamentals.revenue),
-                        gross_profit = COALESCE(EXCLUDED.gross_profit, company_fundamentals.gross_profit),
-                        operating_income = COALESCE(EXCLUDED.operating_income, company_fundamentals.operating_income),
-                        net_income = COALESCE(EXCLUDED.net_income, company_fundamentals.net_income),
-                        ebitda = COALESCE(EXCLUDED.ebitda, company_fundamentals.ebitda),
-                        fiscal_year = EXCLUDED.fiscal_year,
-                        fiscal_quarter = EXCLUDED.fiscal_quarter,
-                        data_source = EXCLUDED.data_source,
-                        last_updated = CURRENT_TIMESTAMP
-                """, (
-                    ticker, datetime.now().date(), 'annual', income.get('fiscal_year'), income.get('fiscal_quarter'),
-                    income.get('revenue'), income.get('gross_profit'),
-                    income.get('operating_income'), income.get('net_income'),
-                    income.get('ebitda'), 'yahoo_finance', datetime.now()
-                ))
-            
-            self.conn.commit()
-            logging.info(f"Successfully stored fundamental data for {ticker}")
-            return True
-            
         except Exception as e:
-            logging.error(f"Error storing fundamental data for {ticker}: {e}")
-            self.conn.rollback()
+            self.logger.error(f"❌ Yahoo Finance service health check failed: {e}")
             return False
-
-    def get_fundamental_data(self, ticker: str) -> Optional[Dict]:
-        """Main method to fetch and store fundamental data for a ticker"""
-        try:
-            # Fetch financial statements
-            financial_data = self.fetch_financial_statements(ticker)
-            
-            # Fetch key statistics
-            key_stats = self.fetch_key_statistics(ticker)
-            
-            # Store data if available
-            if financial_data or key_stats:
-                success = self.store_fundamental_data(ticker, financial_data, key_stats)
-                if success:
-                    return {
-                        'financial_data': financial_data,
-                        'key_stats': key_stats
-                    }
-            
-            return None
-            
-        except Exception as e:
-            logging.error(f"Error getting fundamental data for {ticker}: {e}")
-            return None
-
-    def close(self):
-        """Close database connections"""
-        if self.cur:
-            self.cur.close()
-        if self.conn:
-            self.conn.close()
-        if self.api_limiter:
-            self.api_limiter.close()
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--ticker', type=str, default='AAPL', help='Ticker symbol to fetch')
-    args = parser.parse_args()
-    service = YahooFinanceService()
-    test_ticker = args.ticker
-    result = service.get_fundamental_data(test_ticker)
-    if result:
-        print(f"Successfully fetched fundamental data for {test_ticker}")
-        if result.get('financial_data'):
-            print(f"Financial data keys: {list(result['financial_data'].keys())}")
-        if result.get('key_stats'):
-            print(f"Key stats keys: {list(result['key_stats'].keys())}")
-    else:
-        print(f"Failed to fetch fundamental data for {test_ticker}")
-    service.close() 
+    
+    def get_service_info(self) -> Dict[str, Any]:
+        """
+        Get information about this service
+        
+        Returns:
+            Dict with service information
+        """
+        return {
+            'name': self.service_name,
+            'type': 'free',
+            'api_key_required': False,
+            'rate_limits': {
+                'requests_per_minute': self.max_requests_per_minute,
+                'daily_limit': None  # No daily limit
+            },
+            'capabilities': [
+                'real_time_pricing',
+                'historical_pricing',
+                'fundamental_data',
+                'financial_statements',
+                'key_statistics',
+                'batch_processing',
+                'global_coverage'
+            ],
+            'data_types': [
+                'pricing',
+                'fundamentals',
+                'financial_statements',
+                'ratios',
+                'statistics'
+            ],
+            'coverage': [
+                'US_stocks',
+                'international_stocks',
+                'ETFs',
+                'options',
+                'forex',
+                'crypto'
+            ],
+            'cost_per_call': 0.0,
+            'reliability_score': 0.95,
+            'batch_limit': 100
+        } 

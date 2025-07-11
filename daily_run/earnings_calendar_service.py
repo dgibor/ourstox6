@@ -70,6 +70,66 @@ class EarningsCalendarService:
             logging.error(f"Error creating earnings calendar table: {e}")
             self.conn.rollback()
     
+    def get_earnings_info(self, ticker: str) -> Optional[Dict]:
+        """
+        Get earnings information for a ticker.
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Dictionary containing earnings information
+        """
+        try:
+            # Get the most recent earnings data
+            query = """
+            SELECT earnings_date, estimate_eps, actual_eps, estimate_revenue, actual_revenue
+            FROM earnings_calendar 
+            WHERE ticker = %s 
+            ORDER BY earnings_date DESC 
+            LIMIT 1
+            """
+            
+            result = self.fetch_one(query, (ticker,))
+            if result:
+                return {
+                    'last_earnings_date': result[0],
+                    'estimate_eps': result[1],
+                    'actual_eps': result[2],
+                    'estimate_revenue': result[3],
+                    'actual_revenue': result[4]
+                }
+            
+            return None
+            
+        except Exception as e:
+            logging.error(f"Error getting earnings info for {ticker}: {e}")
+            return None
+    
+    def fetch_one(self, query: str, params: tuple = None) -> Optional[tuple]:
+        """Execute a query and return a single result"""
+        try:
+            self.cur.execute(query, params)
+            return self.cur.fetchone()
+        except Exception as e:
+            logging.error(f"Database query failed: {e}")
+            return None
+
+    def get_earnings_calendar(self, ticker: str) -> Optional[List[Dict]]:
+        """
+        Get earnings calendar data for a ticker (alias for fetch_earnings_calendar).
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            List of earnings calendar entries
+        """
+        earnings_data = self.fetch_earnings_calendar(ticker)
+        if earnings_data:
+            return [earnings_data]  # Return as list for compatibility
+        return []
+
     def fetch_earnings_calendar(self, ticker: str) -> Optional[Dict]:
         """
         Fetch earnings calendar data with fallback: Yahoo → Finnhub → Alpha Vantage

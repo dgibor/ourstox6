@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, date
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import os
 
 from common_imports import *
 from database import DatabaseManager
@@ -35,9 +36,45 @@ class BatchPriceProcessor:
         self.monitoring = SystemMonitor()
         
         # Initialize services
-        self.yahoo_service = YahooFinanceService()
-        self.alpha_vantage_service = AlphaVantageService()
-        self.finnhub_service = FinnhubService()
+        try:
+            self.yahoo_service = YahooFinanceService()
+        except:
+            self.yahoo_service = None
+            logger.warning("Yahoo Finance service not available")
+            
+        try:
+            self.alpha_vantage_service = AlphaVantageService()
+        except:
+            self.alpha_vantage_service = None
+            logger.warning("Alpha Vantage service not available")
+            
+        try:
+            self.finnhub_service = FinnhubService()
+        except:
+            self.finnhub_service = None
+            logger.warning("Finnhub service not available")
+        
+        # Initialize FMP service (preferred for batch operations)
+        try:
+            from fmp_service import FMPService
+            self.fmp_service = FMPService()
+            # Ensure it has required attributes
+            if not hasattr(self.fmp_service, 'base_url'):
+                self.fmp_service.base_url = "https://financialmodelingprep.com/api/v3"
+            if not hasattr(self.fmp_service, 'api_key'):
+                self.fmp_service.api_key = os.getenv('FMP_API_KEY')
+            logger.info("FMP service initialized for batch processing")
+        except Exception as e:
+            logger.warning(f"FMP service not available: {e}")
+            self.fmp_service = None
+        
+        # Service priority for pricing data (optimized order)
+        self.service_priority = [
+            ('FMP', self._get_fmp_batch_prices),
+            ('Yahoo Finance', self._get_yahoo_batch_prices),
+            ('Alpha Vantage', self._get_alpha_vantage_batch_prices),
+            ('Finnhub', self._get_finnhub_batch_prices)
+        ]
     
     def process_batch_prices(self, tickers: List[str]) -> Dict[str, Dict]:
         """
@@ -85,8 +122,7 @@ class BatchPriceProcessor:
                     except Exception as e:
                         logger.error(f"Error processing batch {batch_num}: {e}")
                         self.error_handler.handle_error(
-                            f"Batch price processing failed for batch {batch_num}",
-                            e, ErrorSeverity.HIGH
+                            f"Batch processing failed for batch {batch_num}", e, ErrorSeverity.HIGH
                         )
             
             # Store results in daily_charts table
@@ -102,7 +138,7 @@ class BatchPriceProcessor:
                 'batch_price_processing_time', processing_time
             )
             self.monitoring.record_metric(
-                'batch_price_success_rate', len(results) / len(tickers)
+                'batch_price_success_rate', len(results) / len(tickers) if tickers else 0
             )
             
             return results
@@ -127,14 +163,7 @@ class BatchPriceProcessor:
         """
         logger.debug(f"Processing batch {batch_num} with {len(tickers)} tickers")
         
-        # Try services in order of preference
-        services = [
-            ('Yahoo Finance', self._get_yahoo_batch_prices),
-            ('Alpha Vantage', self._get_alpha_vantage_batch_prices),
-            ('Finnhub', self._get_finnhub_batch_prices)
-        ]
-        
-        for service_name, service_func in services:
+        for service_name, service_func in self.service_priority:
             try:
                 logger.debug(f"Trying {service_name} for batch {batch_num}")
                 results = service_func(tickers)
@@ -150,9 +179,32 @@ class BatchPriceProcessor:
         logger.error(f"All services failed for batch {batch_num}")
         return {}
     
+    def _get_fmp_batch_prices(self, tickers: List[str]) -> Dict[str, Dict]:
+        """Get batch prices from FMP (up to 100 symbols per call)"""
+        try:
+            if not self.fmp_service:
+                logger.warning("FMP service not available, skipping batch")
+                return {}
+                
+            # FMP supports multiple quotes in one call
+            symbols = ','.join(tickers)
+            url = f"{self.fmp_service.base_url}/v3/quote/{symbols}"
+            params = {'apikey': self.fmp_service.api_key}
+            
+            response = self.fmp_service._make_request(url, params)
+            return self._parse_fmp_batch_response(response, tickers)
+            
+        except Exception as e:
+            logger.error(f"FMP batch request failed: {e}")
+            raise
+    
     def _get_yahoo_batch_prices(self, tickers: List[str]) -> Dict[str, Dict]:
         """Get batch prices from Yahoo Finance (up to 100 symbols per call)"""
         try:
+            if not self.yahoo_service:
+                logger.warning("Yahoo Finance service not available, skipping batch")
+                return {}
+                
             symbols = ','.join(tickers)
             url = "https://query1.finance.yahoo.com/v7/finance/quote"
             params = {
@@ -160,8 +212,9 @@ class BatchPriceProcessor:
                 'fields': 'regularMarketPrice,regularMarketVolume,marketCap,regularMarketTime,regularMarketChange,regularMarketChangePercent'
             }
             
-            response = self.yahoo_service._make_request(url, params)
-            return self._parse_yahoo_batch_response(response, tickers)
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            return self._parse_yahoo_batch_response(response.json(), tickers)
             
         except Exception as e:
             logger.error(f"Yahoo Finance batch request failed: {e}")
@@ -170,6 +223,10 @@ class BatchPriceProcessor:
     def _get_alpha_vantage_batch_prices(self, tickers: List[str]) -> Dict[str, Dict]:
         """Get batch prices from Alpha Vantage"""
         try:
+            if not self.alpha_vantage_service:
+                logger.warning("Alpha Vantage service not available, skipping batch")
+                return {}
+                
             # Alpha Vantage has a batch quote endpoint
             symbols = ','.join(tickers)
             url = f"{self.alpha_vantage_service.base_url}/query"
@@ -179,8 +236,9 @@ class BatchPriceProcessor:
                 'apikey': self.alpha_vantage_service.api_key
             }
             
-            response = self.alpha_vantage_service._make_request(url, params)
-            return self._parse_alpha_vantage_batch_response(response, tickers)
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            return self._parse_alpha_vantage_batch_response(response.json(), tickers)
             
         except Exception as e:
             logger.error(f"Alpha Vantage batch request failed: {e}")
@@ -189,20 +247,85 @@ class BatchPriceProcessor:
     def _get_finnhub_batch_prices(self, tickers: List[str]) -> Dict[str, Dict]:
         """Get batch prices from Finnhub"""
         try:
-            # Finnhub supports multiple symbols in one call
-            symbols = ','.join(tickers)
-            url = f"{self.finnhub_service.base_url}/quote"
-            params = {
-                'symbol': symbols,
-                'token': self.finnhub_service.api_key
-            }
+            if not self.finnhub_service:
+                logger.warning("Finnhub service not available, skipping batch")
+                return {}
+                
+            # Finnhub doesn't have a true batch endpoint, so we'll use concurrent requests
+            results = {}
             
-            response = self.finnhub_service._make_request(url, params)
-            return self._parse_finnhub_batch_response(response, tickers)
+            with ThreadPoolExecutor(max_workers=min(5, len(tickers))) as executor:
+                future_to_ticker = {
+                    executor.submit(self._get_single_finnhub_price, ticker): ticker 
+                    for ticker in tickers
+                }
+                
+                for future in as_completed(future_to_ticker):
+                    ticker = future_to_ticker[future]
+                    try:
+                        data = future.result()
+                        if data:
+                            results[ticker] = data
+                    except Exception as e:
+                        logger.error(f"Error getting Finnhub data for {ticker}: {e}")
+            
+            return results
             
         except Exception as e:
             logger.error(f"Finnhub batch request failed: {e}")
             raise
+    
+    def _get_single_finnhub_price(self, ticker: str) -> Optional[Dict]:
+        """Get single ticker price from Finnhub"""
+        try:
+            url = f"{self.finnhub_service.base_url}/api/v1/quote"
+            params = {
+                'symbol': ticker,
+                'token': self.finnhub_service.api_key
+            }
+            
+            response = requests.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data and data.get('c'):  # Current price exists
+                return {
+                    'close_price': data.get('c'),
+                    'volume': None,  # Finnhub quote doesn't include volume
+                    'change': data.get('d'),
+                    'change_percent': data.get('dp'),
+                    'data_source': 'finnhub',
+                    'timestamp': datetime.now()
+                }
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting Finnhub price for {ticker}: {e}")
+            return None
+    
+    def _parse_fmp_batch_response(self, response: List[Dict], tickers: List[str]) -> Dict[str, Dict]:
+        """Parse FMP batch response"""
+        results = {}
+        
+        try:
+            if isinstance(response, list):
+                for quote in response:
+                    symbol = quote.get('symbol')
+                    if symbol in tickers:
+                        results[symbol] = {
+                            'close_price': quote.get('price'),
+                            'volume': quote.get('volume'),
+                            'market_cap': quote.get('marketCap'),
+                            'change': quote.get('change'),
+                            'change_percent': quote.get('changesPercentage'),
+                            'data_source': 'fmp',
+                            'timestamp': datetime.now()
+                        }
+            
+        except Exception as e:
+            logger.error(f"Error parsing FMP response: {e}")
+        
+        return results
     
     def _parse_yahoo_batch_response(self, response: Dict, tickers: List[str]) -> Dict[str, Dict]:
         """Parse Yahoo Finance batch response"""
@@ -241,9 +364,9 @@ class BatchPriceProcessor:
                 symbol = quote.get('1. symbol')
                 if symbol in tickers:
                     results[symbol] = {
-                        'close_price': float(quote.get('2. price', 0)),
-                        'volume': int(quote.get('3. volume', 0)),
-                        'change': float(quote.get('4. change', 0)),
+                        'close_price': safe_get_numeric(quote, '2. price'),
+                        'volume': safe_get_numeric(quote, '3. volume'),
+                        'change': safe_get_numeric(quote, '4. change'),
                         'change_percent': quote.get('5. change percent', '0%'),
                         'data_source': 'alpha_vantage',
                         'timestamp': datetime.now()
@@ -251,31 +374,6 @@ class BatchPriceProcessor:
             
         except Exception as e:
             logger.error(f"Error parsing Alpha Vantage response: {e}")
-        
-        return results
-    
-    def _parse_finnhub_batch_response(self, response: Dict, tickers: List[str]) -> Dict[str, Dict]:
-        """Parse Finnhub batch response"""
-        results = {}
-        
-        try:
-            # Finnhub returns array of quotes
-            quotes = response if isinstance(response, list) else [response]
-            
-            for quote in quotes:
-                symbol = quote.get('symbol')
-                if symbol in tickers:
-                    results[symbol] = {
-                        'close_price': quote.get('c'),  # Current price
-                        'volume': quote.get('v'),      # Volume
-                        'change': quote.get('d'),      # Change
-                        'change_percent': quote.get('dp'),  # Change percent
-                        'data_source': 'finnhub',
-                        'timestamp': datetime.now()
-                    }
-            
-        except Exception as e:
-            logger.error(f"Error parsing Finnhub response: {e}")
         
         return results
     
@@ -293,50 +391,52 @@ class BatchPriceProcessor:
         logger.info(f"Storing {len(price_data)} daily price records")
         
         try:
-            # Prepare batch insert
-            values = []
+            # Prepare individual inserts (safer than batch for now)
             today = date.today()
+            successful_inserts = 0
             
             for ticker, data in price_data.items():
                 if data.get('close_price'):
-                    values.append((
-                        ticker,
-                        today,
-                        data.get('close_price'),  # Use close as open/high/low if not available
-                        data.get('close_price'),
-                        data.get('close_price'),
-                        data.get('close_price'),
-                        data.get('volume', 0),
-                        data.get('market_cap'),
-                        data.get('data_source', 'batch_api'),
-                        datetime.now()
-                    ))
+                    try:
+                        # Convert price to cents for storage
+                        close_price_cents = int(float(data.get('close_price')) * 100)
+                        volume = data.get('volume', 0) or 0
+                        
+                        query = """
+                        INSERT INTO daily_charts (
+                            ticker, date, open_price, high_price, low_price, 
+                            close_price, volume, data_source, created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                        ON CONFLICT (ticker, date) 
+                        DO UPDATE SET
+                            close_price = EXCLUDED.close_price,
+                            volume = EXCLUDED.volume,
+                            data_source = EXCLUDED.data_source,
+                            updated_at = NOW()
+                        """
+                        
+                        values = (
+                            ticker,
+                            today,
+                            close_price_cents,  # Use close as open/high/low if not available
+                            close_price_cents,
+                            close_price_cents,
+                            close_price_cents,
+                            volume,
+                            data.get('data_source', 'batch_api')
+                        )
+                        
+                        self.db.execute_update(query, values)
+                        successful_inserts += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Error storing price for {ticker}: {e}")
+                        continue
             
-            if values:
-                # Batch insert with conflict resolution
-                query = """
-                INSERT INTO daily_charts (
-                    ticker, date, open_price, high_price, low_price, 
-                    close_price, volume, market_cap, data_source, created_at
-                ) VALUES %s
-                ON CONFLICT (ticker, date) 
-                DO UPDATE SET
-                    open_price = EXCLUDED.open_price,
-                    high_price = EXCLUDED.high_price,
-                    low_price = EXCLUDED.low_price,
-                    close_price = EXCLUDED.close_price,
-                    volume = EXCLUDED.volume,
-                    market_cap = EXCLUDED.market_cap,
-                    data_source = EXCLUDED.data_source,
-                    updated_at = NOW()
-                """
-                
-                # Execute batch insert
-                self.db.execute_batch(query, values)
-                logger.info(f"Successfully stored {len(values)} daily price records")
-                
-                # Update monitoring
-                self.monitoring.record_metric('daily_prices_stored', len(values))
+            logger.info(f"Successfully stored {successful_inserts}/{len(price_data)} daily price records")
+            
+            # Update monitoring
+            self.monitoring.record_metric('daily_prices_stored', successful_inserts)
                 
         except Exception as e:
             logger.error(f"Error storing daily prices: {e}")
@@ -356,12 +456,14 @@ class BatchPriceProcessor:
         """
         try:
             query = """
-            SELECT * FROM daily_charts 
+            SELECT ticker, date, close_price, volume, data_source 
+            FROM daily_charts 
             WHERE ticker = %s 
             ORDER BY date DESC 
             LIMIT 1
             """
-            return self.db.fetch_one(query, (ticker,))
+            result = self.db.fetch_one(query, (ticker,))
+            return dict(result) if result else None
             
         except Exception as e:
             logger.error(f"Error getting latest daily price for {ticker}: {e}")
@@ -380,15 +482,22 @@ class BatchPriceProcessor:
         """
         try:
             placeholders = ','.join(['%s'] * len(tickers))
-            query = """
-            SELECT * FROM daily_charts 
-            WHERE ticker IN ({}) AND date = %s
-            """.format(placeholders)
+            query = f"""
+            SELECT ticker, date, close_price, volume, data_source 
+            FROM daily_charts 
+            WHERE ticker IN ({placeholders}) AND date = %s
+            """
             
             params = tickers + [target_date]
-            results = self.db.fetch_all(query, params)
+            results = self.db.execute_query(query, params)
             
-            return {row['ticker']: row for row in results}
+            return {row[0]: {
+                'ticker': row[0],
+                'date': row[1], 
+                'close_price': row[2],
+                'volume': row[3],
+                'data_source': row[4]
+            } for row in results}
             
         except Exception as e:
             logger.error(f"Error getting daily prices for date {target_date}: {e}")
@@ -400,7 +509,7 @@ def main():
     logging.basicConfig(level=logging.INFO)
     
     # Test tickers
-    test_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META', 'NFLX', 'AMD', 'INTC']
+    test_tickers = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA']
     
     # Initialize database and processor
     db = DatabaseManager()
@@ -424,7 +533,7 @@ def main():
     except Exception as e:
         logger.error(f"Test failed: {e}")
     finally:
-        db.close()
+        db.disconnect()
 
 
 if __name__ == "__main__":
