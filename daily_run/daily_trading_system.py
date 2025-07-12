@@ -210,32 +210,65 @@ class DailyTradingSystem:
                 'error': str(e)
             }
 
+    def _get_tickers_needing_price_updates(self) -> List[str]:
+        """Get tickers that don't have today's price data"""
+        try:
+            query = """
+            SELECT s.ticker 
+            FROM stocks s
+            LEFT JOIN daily_charts dc ON s.ticker = dc.ticker 
+                AND dc.date = CURRENT_DATE
+            WHERE s.ticker IS NOT NULL
+                AND dc.ticker IS NULL
+            """
+            results = self.db.execute_query(query)
+            return [row[0] for row in results]
+        except Exception as e:
+            logger.error(f"Error getting tickers needing price updates: {e}")
+            # Fallback to all active tickers if query fails
+            return self._get_active_tickers()
+
     def _update_daily_prices(self) -> Dict:
         """
         Update daily_charts table with latest prices using batch processing.
+        Only processes tickers that don't already have today's data.
         """
         logger.info("💰 Updating daily prices with batch processing")
         
         try:
             start_time = time.time()
             
-            # Get all active tickers
-            tickers = self._get_active_tickers()
-            logger.info(f"Processing {len(tickers)} active tickers")
+            # Get only tickers that need price updates
+            tickers_needing_updates = self._get_tickers_needing_price_updates()
+            logger.info(f"Processing {len(tickers_needing_updates)} tickers needing price updates")
+            
+            if not tickers_needing_updates:
+                logger.info("✅ All tickers already have today's price data - skipping price updates")
+                return {
+                    'phase': 'daily_price_update',
+                    'status': 'skipped',
+                    'reason': 'all_tickers_up_to_date',
+                    'total_tickers': 0,
+                    'successful_updates': 0,
+                    'failed_updates': 0,
+                    'processing_time': time.time() - start_time,
+                    'api_calls_used': 0,
+                    'data_stored_in': 'daily_charts'
+                }
             
             # Process batch prices (100 stocks per API call)
-            price_data = self.batch_price_processor.process_batch_prices(tickers)
+            price_data = self.batch_price_processor.process_batch_prices(tickers_needing_updates)
             
             processing_time = time.time() - start_time
-            api_calls_used = (len(tickers) + 99) // 100  # 100 per call
+            api_calls_used = (len(tickers_needing_updates) + 99) // 100  # 100 per call
             self.api_calls_used += api_calls_used
             
             result = {
                 'phase': 'daily_price_update',
-                'total_tickers': len(tickers),
+                'total_tickers': len(tickers_needing_updates),
                 'successful_updates': len(price_data),
-                'failed_updates': len(tickers) - len(price_data),
-                'success_rate': len(price_data) / len(tickers) if tickers else 0,
+                'failed_updates': len(tickers_needing_updates) - len(price_data),
+                'success_rate': len(price_data) / len(tickers_needing_updates) if tickers_needing_updates else 0,
                 'processing_time': processing_time,
                 'api_calls_used': api_calls_used,
                 'data_stored_in': 'daily_charts'
@@ -436,7 +469,7 @@ class DailyTradingSystem:
     def _ensure_minimum_historical_data(self) -> Dict:
         """
         PRIORITY 3: Update historical prices until at least 100 days of data for every company.
-        Uses remaining API calls after priorities 1 and 2.
+        Uses remaining API calls after priorities 1 and 2 with optimized batch processing.
         """
         logger.info("📚 PRIORITY 3: Ensuring minimum 100 days of historical data")
         
@@ -460,30 +493,46 @@ class DailyTradingSystem:
             tickers_needing_history = self._get_tickers_needing_100_days_history()
             logger.info(f"Found {len(tickers_needing_history)} tickers needing historical data")
             
-            # Process historical data within API limit
+            # Optimize processing based on available API calls
             successful_updates = 0
             failed_updates = 0
             api_calls_used = 0
             
-            for ticker in tickers_needing_history:
+            # Process tickers in batches to optimize API usage
+            batch_size = min(50, remaining_calls)  # Process up to 50 tickers at once
+            ticker_batches = [tickers_needing_history[i:i + batch_size] 
+                            for i in range(0, len(tickers_needing_history), batch_size)]
+            
+            for batch_num, ticker_batch in enumerate(ticker_batches):
                 if api_calls_used >= remaining_calls:
                     logger.info(f"API call limit reached after {api_calls_used} calls")
                     break
                 
-                try:
-                    # Get historical data to ensure 100+ days
-                    history_result = self._get_historical_data_to_minimum(ticker, min_days=100)
-                    if history_result['success']:
-                        successful_updates += 1
-                        api_calls_used += history_result['api_calls']
-                        logger.debug(f"Updated historical data for {ticker} - {history_result['days_added']} days added")
-                    else:
+                logger.info(f"Processing historical data batch {batch_num + 1}/{len(ticker_batches)} ({len(ticker_batch)} tickers)")
+                
+                for ticker in ticker_batch:
+                    if api_calls_used >= remaining_calls:
+                        break
+                    
+                    try:
+                        # Get historical data to ensure 100+ days
+                        history_result = self._get_historical_data_to_minimum(ticker, min_days=100)
+                        if history_result['success']:
+                            successful_updates += 1
+                            api_calls_used += history_result['api_calls']
+                            logger.debug(f"Updated historical data for {ticker} - {history_result['days_added']} days added ({history_result.get('reason', 'unknown')})")
+                        else:
+                            failed_updates += 1
+                            logger.debug(f"Failed to get historical data for {ticker}: {history_result.get('error', 'unknown error')}")
+                            
+                    except Exception as e:
+                        logger.error(f"Error getting historical data for {ticker}: {e}")
                         failed_updates += 1
-                        logger.debug(f"Failed to get historical data for {ticker}")
-                        
-                except Exception as e:
-                    logger.error(f"Error getting historical data for {ticker}: {e}")
-                    failed_updates += 1
+                        api_calls_used += 1  # Count failed attempts
+                
+                # Add small delay between batches to avoid rate limiting
+                if batch_num < len(ticker_batches) - 1 and api_calls_used < remaining_calls:
+                    time.sleep(0.5)
             
             self.api_calls_used += api_calls_used
             processing_time = time.time() - start_time
@@ -494,7 +543,8 @@ class DailyTradingSystem:
                 'successful_updates': successful_updates,
                 'failed_updates': failed_updates,
                 'api_calls_used': api_calls_used,
-                'processing_time': processing_time
+                'processing_time': processing_time,
+                'batches_processed': len(ticker_batches)
             }
             
             logger.info(f"✅ PRIORITY 3: Historical data completed - {successful_updates} tickers updated")
@@ -1225,7 +1275,7 @@ class DailyTradingSystem:
 
     def _get_historical_data_to_minimum(self, ticker: str, min_days: int = 100) -> Dict:
         """
-        Get historical data for a ticker to ensure minimum days requirement.
+        Get historical data for a ticker to ensure minimum days requirement using optimized batch processing.
         """
         try:
             # Check current days available
@@ -1248,25 +1298,53 @@ class DailyTradingSystem:
             # Calculate how many more days we need
             days_needed = min_days - current_days + 50  # Add buffer
             
-            # Use service factory to get historical data
-            service = self.service_manager.get_service('yahoo_finance')
-            historical_data = service.get_historical_data(ticker, days=days_needed)
+            # Try FMP service first (most efficient for batch operations)
+            try:
+                fmp_service = self.service_manager.get_service('fmp')
+                if fmp_service and hasattr(fmp_service, 'get_historical_data'):
+                    historical_data = fmp_service.get_historical_data(ticker, days=days_needed)
+                    if historical_data:
+                        # Store historical data
+                        self._store_historical_data(ticker, historical_data)
+                        return {
+                            'success': True,
+                            'api_calls': 1,
+                            'days_added': len(historical_data),
+                            'total_days_now': current_days + len(historical_data),
+                            'reason': 'fmp_historical_data'
+                        }
+            except Exception as e:
+                logger.debug(f"FMP historical data failed for {ticker}: {e}")
             
-            if historical_data:
-                # Store historical data
-                self._store_historical_data(ticker, historical_data)
-                return {
-                    'success': True,
-                    'api_calls': 1,
-                    'days_added': len(historical_data),
-                    'total_days_now': current_days + len(historical_data)
-                }
-            else:
+            # Fallback to Yahoo Finance
+            try:
+                service = self.service_manager.get_service('yahoo_finance')
+                historical_data = service.get_historical_data(ticker, days=days_needed)
+                
+                if historical_data:
+                    # Store historical data
+                    self._store_historical_data(ticker, historical_data)
+                    return {
+                        'success': True,
+                        'api_calls': 1,
+                        'days_added': len(historical_data),
+                        'total_days_now': current_days + len(historical_data),
+                        'reason': 'yahoo_historical_data'
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'api_calls': 1,
+                        'days_added': 0,
+                        'error': 'no_data_returned'
+                    }
+            except Exception as e:
+                logger.error(f"Yahoo Finance historical data failed for {ticker}: {e}")
                 return {
                     'success': False,
                     'api_calls': 1,
                     'days_added': 0,
-                    'error': 'no_data_returned'
+                    'error': str(e)
                 }
                 
         except Exception as e:

@@ -333,17 +333,31 @@ def is_rate_limit_error(error_msg):
 
 def is_delisted_error(error_msg):
     """Check if error indicates stock is delisted."""
+    # More specific delisted indicators - avoid false positives
     delisted_indicators = [
+        "symbol may be delisted",
+        "no data found, symbol may be delisted",
+        "possibly delisted",
         "delisted",
-        "no data found",
-        "not found",
         "invalid symbol",
-        "no price data",
         "ticker not found",
-        "404"
+        "404 not found"
     ]
     error_lower = str(error_msg).lower()
-    return any(indicator in error_lower for indicator in delisted_indicators)
+    
+    # Check for specific delisted patterns
+    if any(indicator in error_lower for indicator in delisted_indicators):
+        return True
+    
+    # Additional check: if it's a YFRateLimitError, it's NOT delisted
+    if "rate limit" in error_lower or "too many requests" in error_lower:
+        return False
+    
+    # Additional check: if it's a timeout or connection error, it's NOT delisted
+    if "timeout" in error_lower or "connection" in error_lower:
+        return False
+    
+    return False
 
 def log_delisted_stock(symbol):
     """Log delisted stock to separate file."""
