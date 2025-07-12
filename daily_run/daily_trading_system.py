@@ -145,13 +145,17 @@ class DailyTradingSystem:
             logger.info("🔍 PRIORITY 4: Filling missing fundamental data")
             missing_fundamentals_result = self._fill_missing_fundamental_data()
             
+            # Cleanup: Remove delisted stocks to prevent future API errors
+            cleanup_result = self._cleanup_delisted_stocks()
+            
             # Compile final results
             results = self._compile_results({
                 'trading_day_check': trading_day_result,
                 'priority_1_trading_day': priority1_result,
                 'priority_2_earnings_fundamentals': earnings_fundamentals_result,
                 'priority_3_historical_data': historical_result,
-                'priority_4_missing_fundamentals': missing_fundamentals_result
+                'priority_4_missing_fundamentals': missing_fundamentals_result,
+                'cleanup_delisted_stocks': cleanup_result
             })
             
             logger.info("✅ Daily Trading System completed successfully - All priorities processed")
@@ -217,7 +221,7 @@ class DailyTradingSystem:
             SELECT s.ticker 
             FROM stocks s
             LEFT JOIN daily_charts dc ON s.ticker = dc.ticker 
-                AND dc.date = CURRENT_DATE
+                AND dc.date = CURRENT_DATE::date
             WHERE s.ticker IS NOT NULL
                 AND dc.ticker IS NULL
             """
@@ -698,6 +702,67 @@ class DailyTradingSystem:
             logger.error(f"Error in technical indicators calculation: {e}")
             # Return safe counts even if the main process fails
             return {'successful_calculations': 0, 'failed_calculations': len(tickers)}
+
+    def _cleanup_delisted_stocks(self) -> Dict:
+        """
+        Clean up delisted stocks that are causing API errors.
+        This helps reduce wasted API calls on non-existent stocks.
+        """
+        logger.info("🧹 Cleaning up delisted stocks")
+        
+        try:
+            start_time = time.time()
+            
+            # Get list of stocks that consistently fail
+            delisted_candidates = [
+                'PLT', 'REP', 'SBA', 'SCG', 'SDE', 'SOUP', 'STO', 'SYNC', 'TCB', 
+                'TES', 'TEV', 'TIF', 'TII', 'TOT', 'TXR', 'ZA', 'ZE', 'BRK.B', 'SNE'
+            ]
+            
+            removed_count = 0
+            for ticker in delisted_candidates:
+                try:
+                    # Check if ticker exists in stocks table
+                    query = "SELECT COUNT(*) FROM stocks WHERE ticker = %s"
+                    result = self.db.fetch_one(query, (ticker,))
+                    
+                    if result and result[0] > 0:
+                        # Remove from stocks table
+                        delete_query = "DELETE FROM stocks WHERE ticker = %s"
+                        self.db.execute_update(delete_query, (ticker,))
+                        
+                        # Remove from daily_charts table
+                        delete_charts_query = "DELETE FROM daily_charts WHERE ticker = %s"
+                        self.db.execute_update(delete_charts_query, (ticker,))
+                        
+                        logger.info(f"Removed delisted stock: {ticker}")
+                        removed_count += 1
+                        
+                except Exception as e:
+                    logger.error(f"Error removing delisted stock {ticker}: {e}")
+                    continue
+            
+            result = {
+                'phase': 'cleanup_delisted_stocks',
+                'candidates_checked': len(delisted_candidates),
+                'removed_count': removed_count,
+                'processing_time': time.time() - start_time
+            }
+            
+            logger.info(f"✅ Cleanup completed - {removed_count} delisted stocks removed")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in delisted stocks cleanup: {e}")
+            self.error_handler.handle_error(
+                "Delisted stocks cleanup failed", e, ErrorSeverity.MEDIUM
+            )
+            return {
+                'phase': 'cleanup_delisted_stocks',
+                'error': str(e),
+                'removed_count': 0
+            }
 
     def _store_zero_indicators(self, ticker: str):
         """

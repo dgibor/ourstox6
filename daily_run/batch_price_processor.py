@@ -468,9 +468,12 @@ class BatchPriceProcessor:
             today = date.today()
             successful_inserts = 0
             for ticker, data in price_data.items():
-                if data.get('close'):
+                # Handle different field names from different services
+                close_val = data.get('close') or data.get('close_price')
+                if close_val:
                     try:
-                        close_val = float(data.get('close'))
+                        close_val = float(close_val)
+                        # For now, use close price for all OHLC since we only have close from batch APIs
                         open_val = float(data.get('open', close_val))
                         high_val = float(data.get('high', close_val))
                         low_val = float(data.get('low', close_val))
