@@ -39,7 +39,8 @@ def setup_logging(service_name: str, log_file: str = None):
     """Setup logging for a service"""
     if log_file is None:
         log_file = f'daily_run/logs/{service_name}.log'
-    
+    # Ensure the logs directory exists
+    os.makedirs(os.path.dirname(log_file), exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
