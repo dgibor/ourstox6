@@ -480,8 +480,8 @@ class BatchPriceProcessor:
                         volume = data.get('volume', 0) or 0
                         query = """
                         INSERT INTO daily_charts (
-                            ticker, date, open, high, low, close, volume, data_source, created_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                            ticker, date, open, high, low, close, volume, created_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                         ON CONFLICT (ticker, date) 
                         DO UPDATE SET
                             open = EXCLUDED.open,
@@ -489,7 +489,6 @@ class BatchPriceProcessor:
                             low = EXCLUDED.low,
                             close = EXCLUDED.close,
                             volume = EXCLUDED.volume,
-                            data_source = EXCLUDED.data_source,
                             updated_at = NOW()
                         """
                         values = (
@@ -499,8 +498,7 @@ class BatchPriceProcessor:
                             high_val,
                             low_val,
                             close_val,
-                            volume,
-                            data.get('data_source', 'batch_api')
+                            volume
                         )
                         self.db.execute_update(query, values)
                         successful_inserts += 1
@@ -525,7 +523,7 @@ class BatchPriceProcessor:
         """
         try:
             query = """
-            SELECT ticker, date, close, volume, data_source 
+            SELECT ticker, date, close, volume
             FROM daily_charts 
             WHERE ticker = %s 
             ORDER BY date DESC 
@@ -549,7 +547,7 @@ class BatchPriceProcessor:
         try:
             placeholders = ','.join(['%s'] * len(tickers))
             query = f"""
-            SELECT ticker, date, close, volume, data_source 
+            SELECT ticker, date, close, volume
             FROM daily_charts 
             WHERE ticker IN ({placeholders}) AND date = %s
             """
@@ -559,8 +557,7 @@ class BatchPriceProcessor:
                 'ticker': row[0],
                 'date': row[1], 
                 'close': row[2],
-                'volume': row[3],
-                'data_source': row[4]
+                'volume': row[3]
             } for row in results}
         except Exception as e:
             logger.error(f"Error getting daily prices for date {target_date}: {e}")

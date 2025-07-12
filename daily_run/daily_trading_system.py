@@ -372,6 +372,7 @@ class DailyTradingSystem:
                 'total_tickers': len(tickers),
                 'successful_calculations': technical_result.get('successful_calculations', 0),
                 'failed_calculations': technical_result.get('failed_calculations', 0),
+                'historical_fetches': technical_result.get('historical_fetches', 0),
                 'processing_time': processing_time
             }
             
@@ -653,11 +654,12 @@ class DailyTradingSystem:
     def _calculate_technical_indicators(self, tickers: List[str]) -> Dict:
         """
         Calculate technical indicators for tickers with robust error handling.
-        Ensures no ticker failure can break the entire process.
+        Fetches historical data when needed to ensure sufficient data for calculations.
         """
         try:
             successful = 0
             failed = 0
+            historical_fetches = 0
             
             logger.info(f"Starting technical indicator calculations for {len(tickers)} tickers")
             
@@ -665,6 +667,26 @@ class DailyTradingSystem:
                 try:
                     # Get price data for technical calculations
                     price_data = self.db.get_price_data_for_technicals(ticker)
+                    
+                    # Check if we have enough data for technical indicators (minimum 50 days for EMA 50)
+                    if not price_data or len(price_data) < 50:
+                        # Check if we have enough API calls remaining for historical data
+                        remaining_calls = self.max_api_calls_per_day - self.api_calls_used
+                        if remaining_calls > 0:
+                            logger.info(f"Insufficient data for {ticker}: {len(price_data) if price_data else 0} days, fetching historical data (API calls remaining: {remaining_calls})")
+                            
+                            # Fetch historical data to ensure minimum 100 days
+                            historical_result = self._get_historical_data_to_minimum(ticker, min_days=100)
+                            if historical_result.get('success'):
+                                historical_fetches += 1
+                                # Get updated price data after fetching historical data
+                                price_data = self.db.get_price_data_for_technicals(ticker)
+                                logger.info(f"Fetched historical data for {ticker}: now have {len(price_data) if price_data else 0} days")
+                            else:
+                                logger.warning(f"Failed to fetch historical data for {ticker}")
+                        else:
+                            logger.warning(f"Insufficient data for {ticker} but no API calls remaining for historical fetch")
+                    
                     if not price_data:
                         logger.debug(f"No price data available for {ticker}")
                         failed += 1
@@ -691,17 +713,18 @@ class DailyTradingSystem:
                     self._store_zero_indicators(ticker)
                     failed += 1
             
-            logger.info(f"Technical indicators completed: {successful} successful, {failed} failed")
+            logger.info(f"Technical indicators completed: {successful} successful, {failed} failed, {historical_fetches} historical fetches")
             
             return {
                 'successful_calculations': successful,
-                'failed_calculations': failed
+                'failed_calculations': failed,
+                'historical_fetches': historical_fetches
             }
             
         except Exception as e:
             logger.error(f"Error in technical indicators calculation: {e}")
             # Return safe counts even if the main process fails
-            return {'successful_calculations': 0, 'failed_calculations': len(tickers)}
+            return {'successful_calculations': 0, 'failed_calculations': len(tickers), 'historical_fetches': 0}
 
     def _cleanup_delisted_stocks(self) -> Dict:
         """
