@@ -92,7 +92,8 @@ def log_delisted_stock(symbol):
     with open(log_file, 'a') as f:
         f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} - DELISTED: {symbol}\n")
     
-    logging.warning(f"Stock {symbol} appears to be delisted - logged to delisted.log")
+    # Use debug level instead of warning to reduce log noise
+    logging.debug(f"Stock {symbol} appears to be delisted - logged to delisted.log")
 
 def fetch_yahoo_history_single(ticker, start_date, end_date):
     """Fetch historical data for a single ticker using Yahoo Finance."""

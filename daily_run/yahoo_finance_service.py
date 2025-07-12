@@ -75,7 +75,7 @@ class YahooFinanceService:
             hist = stock.history(period="1d")
             
             if hist.empty:
-                self.logger.warning(f"No pricing data found for {ticker}")
+                self.logger.debug(f"No pricing data found for {ticker}")
                 return None
             
             latest = hist.iloc[-1]

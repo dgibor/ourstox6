@@ -479,7 +479,7 @@ class DailyTradingSystem:
                         logger.debug(f"Updated historical data for {ticker} - {history_result['days_added']} days added")
                     else:
                         failed_updates += 1
-                        logger.warning(f"Failed to get historical data for {ticker}")
+                        logger.debug(f"Failed to get historical data for {ticker}")
                         
                 except Exception as e:
                     logger.error(f"Error getting historical data for {ticker}: {e}")
@@ -901,7 +901,7 @@ class DailyTradingSystem:
                         successful_updates += 1
                         api_calls_used += historical_result['api_calls']
                     else:
-                        logger.warning(f"Failed to get historical data for {ticker}")
+                        logger.debug(f"Failed to get historical data for {ticker}")
                         
                 except Exception as e:
                     logger.error(f"Error getting historical data for {ticker}: {e}")
