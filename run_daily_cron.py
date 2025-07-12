@@ -87,6 +87,38 @@ def run_daily_trading_system(is_backup=False):
             else:
                 raise ImportError(f"Cannot find daily_trading_system.py at {module_path}")
         
+        # Fill historical data BEFORE running the daily trading system
+        # This ensures technical indicators have enough data to calculate
+        try:
+            # Add archive path to sys.path for imports
+            archive_path = os.path.join(daily_run_dir, 'archive_20250622_215640')
+            sys.path.insert(0, archive_path)
+            
+            from fill_history import fill_history
+            from fill_history_market import fill_history_market
+            from fill_history_sector import fill_history_sector
+            
+            logger.info("🕰️  Filling historical data BEFORE daily trading process...")
+            logger.info("🕰️  Filling historical data with fill_history()...")
+            fill_history()
+            logger.info("✅ Historical data fill completed.")
+            
+            logger.info("🕰️  Filling market historical data with fill_history_market()...")
+            fill_history_market()
+            logger.info("✅ Market historical data fill completed.")
+            
+            logger.info("🕰️  Filling sector historical data with fill_history_sector()...")
+            fill_history_sector()
+            logger.info("✅ Sector historical data fill completed.")
+            
+            # Remove archive path from sys.path
+            sys.path.remove(archive_path)
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to fill historical data: {e}")
+            import traceback
+            logger.error(f"🔍 Historical fill error traceback: {traceback.format_exc()}")
+        
         # Initialize and run the system
         logger.info("🏗️  Initializing Daily Trading System...")
         trading_system = DailyTradingSystem()

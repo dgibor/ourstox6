@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, date
 import requests
 from dataclasses import dataclass
+import numpy as np
 
 from database import DatabaseManager
 from error_handler import ErrorHandler
@@ -159,7 +160,7 @@ class YahooFinanceService:
             cleaned_data = {}
             for key, value in fundamental_data.items():
                 if value is not None and pd.notna(value):
-                    if isinstance(value, (int, float)) and not pd.isinf(value):
+                    if isinstance(value, (int, float)) and not np.isinf(value):
                         cleaned_data[key] = float(value)
                     else:
                         cleaned_data[key] = value
@@ -254,14 +255,14 @@ class YahooFinanceService:
             # Store in company_fundamentals table
             sql = """
             INSERT INTO company_fundamentals (
-                ticker, market_cap, revenue_ttm, net_income_ttm, total_debt,
+                ticker, report_date, period_type, market_cap, revenue_ttm, net_income_ttm, total_debt,
                 total_cash, book_value, shares_outstanding, pe_ratio, pb_ratio,
                 ps_ratio, debt_to_equity, roe, roa, profit_margin, operating_margin,
                 gross_margin, dividend_yield, peg_ratio, beta, enterprise_value,
                 ev_revenue, ev_ebitda, current_ratio, quick_ratio, data_source,
                 last_updated
             ) VALUES (
-                %(ticker)s, %(market_cap)s, %(revenue_ttm)s, %(net_income_ttm)s,
+                %(ticker)s, %(report_date)s, %(period_type)s, %(market_cap)s, %(revenue_ttm)s, %(net_income_ttm)s,
                 %(total_debt)s, %(total_cash)s, %(book_value)s, %(shares_outstanding)s,
                 %(pe_ratio)s, %(pb_ratio)s, %(ps_ratio)s, %(debt_to_equity)s,
                 %(roe)s, %(roa)s, %(profit_margin)s, %(operating_margin)s,
@@ -269,38 +270,45 @@ class YahooFinanceService:
                 %(enterprise_value)s, %(ev_revenue)s, %(ev_ebitda)s, %(current_ratio)s,
                 %(quick_ratio)s, %(data_source)s, %(timestamp)s
             )
-            ON DUPLICATE KEY UPDATE
-                market_cap = VALUES(market_cap),
-                revenue_ttm = VALUES(revenue_ttm),
-                net_income_ttm = VALUES(net_income_ttm),
-                total_debt = VALUES(total_debt),
-                total_cash = VALUES(total_cash),
-                book_value = VALUES(book_value),
-                shares_outstanding = VALUES(shares_outstanding),
-                pe_ratio = VALUES(pe_ratio),
-                pb_ratio = VALUES(pb_ratio),
-                ps_ratio = VALUES(ps_ratio),
-                debt_to_equity = VALUES(debt_to_equity),
-                roe = VALUES(roe),
-                roa = VALUES(roa),
-                profit_margin = VALUES(profit_margin),
-                operating_margin = VALUES(operating_margin),
-                gross_margin = VALUES(gross_margin),
-                dividend_yield = VALUES(dividend_yield),
-                peg_ratio = VALUES(peg_ratio),
-                beta = VALUES(beta),
-                enterprise_value = VALUES(enterprise_value),
-                ev_revenue = VALUES(ev_revenue),
-                ev_ebitda = VALUES(ev_ebitda),
-                current_ratio = VALUES(current_ratio),
-                quick_ratio = VALUES(quick_ratio),
-                data_source = VALUES(data_source),
-                last_updated = VALUES(last_updated)
+            ON CONFLICT (ticker) DO UPDATE SET
+                report_date = EXCLUDED.report_date,
+                period_type = EXCLUDED.period_type,
+                market_cap = EXCLUDED.market_cap,
+                revenue_ttm = EXCLUDED.revenue_ttm,
+                net_income_ttm = EXCLUDED.net_income_ttm,
+                total_debt = EXCLUDED.total_debt,
+                total_cash = EXCLUDED.total_cash,
+                book_value = EXCLUDED.book_value,
+                shares_outstanding = EXCLUDED.shares_outstanding,
+                pe_ratio = EXCLUDED.pe_ratio,
+                pb_ratio = EXCLUDED.pb_ratio,
+                ps_ratio = EXCLUDED.ps_ratio,
+                debt_to_equity = EXCLUDED.debt_to_equity,
+                roe = EXCLUDED.roe,
+                roa = EXCLUDED.roa,
+                profit_margin = EXCLUDED.profit_margin,
+                operating_margin = EXCLUDED.operating_margin,
+                gross_margin = EXCLUDED.gross_margin,
+                dividend_yield = EXCLUDED.dividend_yield,
+                peg_ratio = EXCLUDED.peg_ratio,
+                beta = EXCLUDED.beta,
+                enterprise_value = EXCLUDED.enterprise_value,
+                ev_revenue = EXCLUDED.ev_revenue,
+                ev_ebitda = EXCLUDED.ev_ebitda,
+                current_ratio = EXCLUDED.current_ratio,
+                quick_ratio = EXCLUDED.quick_ratio,
+                data_source = EXCLUDED.data_source,
+                last_updated = EXCLUDED.last_updated
             """
             
             # Prepare data for database
             db_data = financial_data.copy()
             db_data['last_updated'] = db_data.get('timestamp', datetime.now())
+            
+            # Add required fields for the new schema
+            from datetime import date
+            db_data['report_date'] = date.today()
+            db_data['period_type'] = 'ttm'
             
             self.db.execute_query(sql, db_data)
             self.logger.info(f"Successfully stored fundamental data for {ticker}")

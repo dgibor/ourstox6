@@ -16,6 +16,7 @@ import os
 
 from database import DatabaseManager
 from error_handler import ErrorHandler
+from utility_functions.api_rate_limiter import APIRateLimiter
 
 # Load environment variables
 load_dotenv()
@@ -45,75 +46,46 @@ class FinnhubService:
         self.api_key = os.getenv('FINNHUB_API_KEY')
         self.base_url = "https://finnhub.io/api/v1"
         
-        # Rate limiting (free tier)
-        self.calls_per_minute = 60
-        self.delay_between_requests = 1.0  # 60 seconds / 60 calls = 1 second
-        
-        # Track API usage
-        self.call_history = []
+        # Use robust DB-backed rate limiter
+        self.rate_limiter = APIRateLimiter()
+        self.endpoint = 'quote'  # Default endpoint, can be overridden per call
         
         if not self.api_key:
             self.logger.warning("⚠️ Finnhub API key not found - service will be limited")
         else:
             self.logger.info("✅ Finnhub service initialized")
     
-    def _check_rate_limit(self) -> bool:
-        """Check if we can make an API call within rate limits"""
-        now = datetime.now()
-        
-        # Check minute limit
-        minute_ago = now - timedelta(minutes=1)
-        recent_calls = [call for call in self.call_history if call > minute_ago]
-        
-        if len(recent_calls) >= self.calls_per_minute:
-            self.logger.warning(f"Minute limit reached ({self.calls_per_minute} calls/min)")
-            return False
-        
-        return True
-    
-    def _record_api_call(self):
-        """Record an API call for rate limiting"""
-        now = datetime.now()
-        self.call_history.append(now)
-        
-        # Keep only last hour of call history
-        hour_ago = now - timedelta(hours=1)
-        self.call_history = [call for call in self.call_history if call > hour_ago]
-    
-    def _wait_for_rate_limit(self):
-        """Wait if necessary to respect rate limits"""
-        if not self._check_rate_limit():
-            self.logger.info(f"Waiting {self.delay_between_requests} seconds for rate limit...")
-            time.sleep(self.delay_between_requests)
+    def __del__(self):
+        if hasattr(self, 'rate_limiter'):
+            self.rate_limiter.close()
     
     def _make_request(self, endpoint: str, **params) -> Optional[Dict[str, Any]]:
-        """Make a rate-limited API request"""
+        """Make a rate-limited API request using DB-backed limiter"""
         if not self.api_key:
             self.logger.error("No API key available")
             return None
-        
-        self._wait_for_rate_limit()
-        
+        # Check rate limit before making the call
+        if not self.rate_limiter.check_limit('finnhub', endpoint):
+            self.logger.warning(f"Finnhub API rate limit reached for endpoint {endpoint}. Waiting...")
+            # Optionally, you can sleep until next available time or just return None
+            time.sleep(1)  # Sleep 1 second and try again (simple backoff)
+            if not self.rate_limiter.check_limit('finnhub', endpoint):
+                self.logger.error(f"Still over Finnhub rate limit for endpoint {endpoint}. Skipping call.")
+                return None
         url = f"{self.base_url}/{endpoint}"
         params['token'] = self.api_key
-        
         try:
             response = requests.get(url, params=params, timeout=30)
-            self._record_api_call()
-            
+            self.rate_limiter.record_call('finnhub', endpoint)
             if response.status_code == 200:
                 data = response.json()
-                
-                # Check for API limit or error messages
                 if isinstance(data, dict) and 'error' in data:
                     self.logger.error(f"API error: {data['error']}")
                     return None
-                
                 return data
             else:
                 self.logger.error(f"HTTP {response.status_code}: {response.text}")
                 return None
-                
         except Exception as e:
             self.logger.error(f"API request failed: {e}")
             return None
@@ -335,7 +307,7 @@ class FinnhubService:
             'type': 'freemium',
             'api_key_required': True,
             'rate_limits': {
-                'requests_per_minute': self.calls_per_minute,
+                'requests_per_minute': self.rate_limiter.get_rate_limit('finnhub', 'quote'),
                 'daily_limit': None  # No daily limit on free tier
             },
             'capabilities': [

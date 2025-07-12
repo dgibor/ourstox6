@@ -327,6 +327,37 @@ def fetch_stock_history_with_fallback(ticker, start_date, end_date):
     logging.warning(f"All APIs failed for {ticker}, no historical data available")
     return None
 
+def fetch_fmp_history(ticker, start_date, end_date):
+    """Fetch historical data using FMP API."""
+    try:
+        url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}"
+        params = {
+            'from': start_date.strftime('%Y-%m-%d'),
+            'to': end_date.strftime('%Y-%m-%d'),
+            'apikey': os.getenv('FMP_API_KEY')
+        }
+        response = requests.get(url, params=params, timeout=30)
+        data = response.json()
+        if 'historical' not in data or not data['historical']:
+            return None, "empty_data"
+        df = pd.DataFrame(data['historical'])
+        df['date'] = pd.to_datetime(df['date'])
+        df.set_index('date', inplace=True)
+        df = df.rename(columns={
+            'open': 'Open',
+            'high': 'High',
+            'low': 'Low',
+            'close': 'Close',
+            'volume': 'Volume'
+        })
+        df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
+        df = df.sort_index()
+        logging.info(f"FMP: Fetched {len(df)} days of data for {ticker}")
+        return df, "success"
+    except Exception as e:
+        logging.error(f"FMP error for {ticker}: {e}")
+        return None, "error"
+
 def fill_history_sector():
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
@@ -335,63 +366,24 @@ def fill_history_sector():
     tickers = list(ticker_gaps.keys())
     today = date.today()
     start_date = today - timedelta(days=120)
-    
-    # First try batch processing with Yahoo
-    for i in range(0, len(tickers), BATCH_SIZE):
-        batch = tickers[i:i+BATCH_SIZE]
-        logging.info(f"Processing batch {i//BATCH_SIZE+1}: {batch}")
-        
-        data, status = fetch_yahoo_history(batch, start_date, today)
-        failed_tickers = []
-        
-        if status == "success" and data is not None:
-            for ticker in batch:
-                try:
-                    # Handle multi-level columns from yfinance batch download
-                    if isinstance(data, pd.DataFrame) and hasattr(data.columns, 'levels'):
-                        if ticker in data.columns.get_level_values(0):
-                            tdf = data[ticker].dropna(subset=['Open', 'High', 'Low', 'Close'])
-                        else:
-                            failed_tickers.append(ticker)
-                            continue
-                    elif isinstance(data, pd.DataFrame) and set(['Open', 'High', 'Low', 'Close']).issubset(data.columns):
-                        tdf = data.dropna(subset=['Open', 'High', 'Low', 'Close'])
-                    else:
-                        failed_tickers.append(ticker)
-                        continue
-                    
-                    if tdf.empty:
-                        failed_tickers.append(ticker)
-                        continue
-                        
-                    insert_sector_history(conn, cur, ticker, tdf)
-                    logging.info(f"Batch processing successful for {ticker}")
-                except Exception as e:
-                    logging.error(f"Error processing {ticker} from batch: {e}")
-                    failed_tickers.append(ticker)
-        else:
-            # Entire batch failed
-            logging.warning(f"Yahoo batch failed with status: {status}")
-            failed_tickers = batch
-        
-        # Process failed tickers individually with full fallback system
-        for ticker in failed_tickers:
-            logging.info(f"Processing {ticker} individually with fallback system")
-            tdf = fetch_stock_history_with_fallback(ticker, start_date, today)
-            if tdf is not None and not tdf.empty:
-                insert_sector_history(conn, cur, ticker, tdf)
-                logging.info(f"Successfully retrieved data for {ticker} via fallback")
-            else:
-                logging.warning(f"Failed to retrieve any data for {ticker}")
-        
-        # Rate limiting pause between batches
-        if i + BATCH_SIZE < len(tickers):
-            logging.info("Pausing between batches...")
-            time.sleep(10)
-    
+    for ticker in tickers:
+        logging.info(f"Processing {ticker} for sector historical fill...")
+        # Try FMP first
+        tdf, status = fetch_fmp_history(ticker, start_date, today)
+        if status == "success" and tdf is not None and not tdf.empty:
+            insert_sector_history(conn, cur, ticker, tdf)
+            logging.info(f"FMP fill successful for {ticker}")
+            continue
+        # If FMP fails, try Alpha Vantage
+        tdf, status = fetch_alpha_vantage_history(ticker, years=1)
+        if status == "success" and tdf is not None and not tdf.empty:
+            insert_sector_history(conn, cur, ticker, tdf)
+            logging.info(f"Alpha Vantage fill successful for {ticker}")
+            continue
+        logging.warning(f"Both FMP and Alpha Vantage failed for {ticker}")
     cur.close()
     conn.close()
-    logging.info("Sector history fill complete.")
+    logging.info("Sector ETF history fill complete.")
 
 if __name__ == "__main__":
     fill_history_sector()

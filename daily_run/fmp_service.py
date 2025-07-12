@@ -160,6 +160,34 @@ class FMPService:
         
         return None
 
+    def fetch_batch_quotes(self, tickers: List[str]) -> Optional[List[Dict]]:
+        """Fetch batch quotes for a list of tickers from FMP API."""
+        symbols = ','.join(tickers)
+        url = f"{FMP_BASE_URL}/quote/{symbols}"
+        params = {'apikey': FMP_API_KEY}
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.get(url, params=params, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, list):
+                        return data
+                    else:
+                        logging.warning(f"FMP batch quote response not a list: {data}")
+                        return None
+                else:
+                    logging.warning(f"FMP batch quote failed (status {response.status_code}): {response.text}")
+            except Exception as e:
+                if 'rate limit' in str(e).lower() or '429' in str(e):
+                    if attempt < self.max_retries - 1:
+                        wait_time = self.base_delay * (2 ** attempt)
+                        logging.warning(f"FMP rate limited for batch, retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                        continue
+                logging.error(f"Error fetching FMP batch quotes: {e}")
+                break
+        return None
+
     def parse_financial_data(self, ticker: str, income_data: list, balance_data: list, cash_data: list) -> Optional[Dict]:
         """Parse and standardize FMP financial statement data"""
         try:
@@ -400,14 +428,7 @@ class FMPService:
             
             # Also update company_fundamentals table with UPSERT
             if income or balance or cash_flow:
-                # First, try to delete any existing record to avoid constraint conflicts
-                delete_query = """
-                DELETE FROM company_fundamentals 
-                WHERE ticker = %s AND period_type = 'ttm'
-                """
-                self.cur.execute(delete_query, (ticker,))
-                
-                # Then insert new record
+                # Use ON CONFLICT for upsert
                 insert_query = """
                 INSERT INTO company_fundamentals (
                     ticker, report_date, period_type, fiscal_year, fiscal_quarter,
@@ -415,6 +436,22 @@ class FMPService:
                     total_equity, cash_and_equivalents, operating_income, free_cash_flow,
                     data_source, last_updated
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (ticker) DO UPDATE SET
+                    report_date = EXCLUDED.report_date,
+                    period_type = EXCLUDED.period_type,
+                    fiscal_year = EXCLUDED.fiscal_year,
+                    fiscal_quarter = EXCLUDED.fiscal_quarter,
+                    revenue = EXCLUDED.revenue,
+                    net_income = EXCLUDED.net_income,
+                    ebitda = EXCLUDED.ebitda,
+                    total_assets = EXCLUDED.total_assets,
+                    total_debt = EXCLUDED.total_debt,
+                    total_equity = EXCLUDED.total_equity,
+                    cash_and_equivalents = EXCLUDED.cash_and_equivalents,
+                    operating_income = EXCLUDED.operating_income,
+                    free_cash_flow = EXCLUDED.free_cash_flow,
+                    data_source = EXCLUDED.data_source,
+                    last_updated = EXCLUDED.last_updated
                 """
                 
                 report_date = datetime.now().date()

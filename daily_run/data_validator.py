@@ -9,6 +9,7 @@ import logging
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, date
 import pandas as pd
+import numpy as np
 from error_handler import ErrorHandler, ErrorSeverity
 
 logger = logging.getLogger(__name__)
@@ -303,7 +304,7 @@ class DataValidator:
             
             # Check for NaN or infinite values
             for field, value in indicators.items():
-                if pd.isna(value) or pd.isinf(value):
+                if pd.isna(value) or np.isinf(value):
                     errors.append(f"{field} has invalid value: {value}")
             
             is_valid = len(errors) == 0

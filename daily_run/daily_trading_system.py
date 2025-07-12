@@ -748,7 +748,7 @@ class DailyTradingSystem:
                         logger.debug(f"EMA 20 calculated for {ticker}: {indicators['ema_20']}")
                     else:
                         indicators['ema_20'] = 0.0
-                    
+                        logger.warning(f"EMA 20 could not be calculated for {ticker}: result was NaN or empty. Data points: {len(df)}")
                     if len(df) >= 50:
                         ema_50 = calculate_ema(df['close'], 50)
                         if ema_50 is not None and len(ema_50) > 0 and not ema_50.iloc[-1] != ema_50.iloc[-1]:  # NaN check
@@ -756,13 +756,14 @@ class DailyTradingSystem:
                             logger.debug(f"EMA 50 calculated for {ticker}: {indicators['ema_50']}")
                         else:
                             indicators['ema_50'] = 0.0
+                            logger.warning(f"EMA 50 could not be calculated for {ticker}: result was NaN or empty. Data points: {len(df)}")
                     else:
                         indicators['ema_50'] = 0.0
-                        logger.debug(f"Insufficient data for EMA 50 for {ticker}: {len(df)} days < 50")
+                        logger.warning(f"Insufficient data for EMA 50 for {ticker}: {len(df)} days < 50")
                 else:
                     indicators['ema_20'] = 0.0
                     indicators['ema_50'] = 0.0
-                    logger.debug(f"Insufficient data for EMA calculation for {ticker}: {len(df)} days < 20")
+                    logger.warning(f"Insufficient data for EMA calculation for {ticker}: {len(df)} days < 20")
             except Exception as e:
                 logger.error(f"EMA calculation failed for {ticker}: {e}")
                 indicators['ema_20'] = 0.0
@@ -1314,19 +1315,27 @@ class DailyTradingSystem:
             # Update or insert fundamental data
             query = """
             INSERT INTO company_fundamentals (
-                ticker, revenue, net_income, total_assets, 
-                total_debt, shares_outstanding, last_updated
-            ) VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE)
+                ticker, report_date, period_type, revenue, net_income, total_assets, 
+                total_debt, shares_outstanding, data_source, last_updated
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_DATE)
             ON CONFLICT (ticker) DO UPDATE SET
+                report_date = EXCLUDED.report_date,
+                period_type = EXCLUDED.period_type,
                 revenue = EXCLUDED.revenue,
                 net_income = EXCLUDED.net_income,
                 total_assets = EXCLUDED.total_assets,
                 total_debt = EXCLUDED.total_debt,
                 shares_outstanding = EXCLUDED.shares_outstanding,
+                data_source = EXCLUDED.data_source,
                 last_updated = EXCLUDED.last_updated
             """
             
-            values = (ticker, revenue, net_income, total_assets, total_debt, shares_outstanding)
+            from datetime import date
+            report_date = date.today()
+            period_type = 'ttm'
+            data_source = 'daily_system'
+            
+            values = (ticker, report_date, period_type, revenue, net_income, total_assets, total_debt, shares_outstanding, data_source)
             self.db.execute_update(query, values)
             logger.debug(f"Stored fundamental data for {ticker}")
             
@@ -1391,10 +1400,10 @@ class DailyTradingSystem:
             # Store calculated ratios
             ratio_query = """
             UPDATE company_fundamentals SET
-                pe_ratio = %s,
-                pb_ratio = %s,
-                ps_ratio = %s,
-                debt_to_equity = %s,
+                price_to_earnings = %s,
+                price_to_book = %s,
+                price_to_sales = %s,
+                debt_to_equity_ratio = %s,
                 market_cap = %s
             WHERE ticker = %s
             """

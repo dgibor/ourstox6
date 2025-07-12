@@ -11,6 +11,7 @@ from datetime import datetime, date
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import os
+import collections
 
 from common_imports import *
 from database import DatabaseManager
@@ -18,6 +19,19 @@ from error_handler import ErrorHandler, ErrorSeverity
 from monitoring import SystemMonitor
 
 logger = logging.getLogger(__name__)
+
+# Setup file logging for batch price processor
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'logs')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'batch_price_processor.log')
+
+# Add file handler if not already present
+if not any(isinstance(h, logging.FileHandler) and h.baseFilename == os.path.abspath(log_file) for h in logger.handlers):
+    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
 
 
 class BatchPriceProcessor:
@@ -68,11 +82,11 @@ class BatchPriceProcessor:
             logger.warning(f"FMP service not available: {e}")
             self.fmp_service = None
         
-        # Service priority for pricing data (optimized order)
+        # Service priority for pricing data (FMP first as requested)
         self.service_priority = [
             ('FMP', self._get_fmp_batch_prices),
-            ('Yahoo Finance', self._get_yahoo_batch_prices),
             ('Alpha Vantage', self._get_alpha_vantage_batch_prices),
+            ('Yahoo Finance', self._get_yahoo_batch_prices),
             ('Finnhub', self._get_finnhub_batch_prices)
         ]
     
@@ -91,6 +105,11 @@ class BatchPriceProcessor:
         
         results = {}
         total_batches = (len(tickers) + self.max_batch_size - 1) // self.max_batch_size
+        
+        # Track which service succeeded for each batch
+        self._service_success_counter = collections.Counter()
+        self._service_failure_counter = collections.Counter()
+        self._service_last_error = {}
         
         try:
             # Split tickers into batches
@@ -141,6 +160,11 @@ class BatchPriceProcessor:
                 'batch_price_success_rate', len(results) / len(tickers) if tickers else 0
             )
             
+            # Log service summary
+            logger.info(f"[SUMMARY] Service success counts: {dict(self._service_success_counter)}")
+            logger.info(f"[SUMMARY] Service failure counts: {dict(self._service_failure_counter)}")
+            for service, err in self._service_last_error.items():
+                logger.info(f"[SUMMARY] Last error for {service}: {err}")
             return results
             
         except Exception as e:
@@ -153,30 +177,82 @@ class BatchPriceProcessor:
     def _process_single_batch(self, tickers: List[str], batch_num: int) -> Dict[str, Dict]:
         """
         Process a single batch of tickers using fallback services.
-        
+        Logs service order, attempts, and fallbacks for transparency.
+        Yahoo Finance gets 3 retries before falling back to next service.
         Args:
             tickers: List of ticker symbols for this batch
             batch_num: Batch number for logging
-            
         Returns:
             Dictionary mapping ticker to price data
         """
-        logger.debug(f"Processing batch {batch_num} with {len(tickers)} tickers")
+        logger.info(f"Batch {batch_num}: Service order: {[s[0] for s in self.service_priority]}")
+        logger.info(f"Batch {batch_num}: Processing {len(tickers)} tickers")
         
         for service_name, service_func in self.service_priority:
             try:
-                logger.debug(f"Trying {service_name} for batch {batch_num}")
-                results = service_func(tickers)
+                logger.info(f"Batch {batch_num}: Trying {service_name}")
                 
-                if results:
-                    logger.info(f"Successfully got {len(results)} results from {service_name}")
-                    return results
-                    
+                # Special handling for Yahoo Finance - retry 3 times
+                if service_name == 'Yahoo Finance':
+                    max_retries = 3
+                    for attempt in range(1, max_retries + 1):
+                        try:
+                            logger.info(f"Batch {batch_num}: Yahoo Finance attempt {attempt}/{max_retries}")
+                            results = service_func(tickers)
+                            if results:
+                                logger.info(f"Batch {batch_num}: Yahoo Finance succeeded on attempt {attempt} for {len(results)} tickers")
+                                self._service_success_counter[service_name] += 1
+                                return results
+                            else:
+                                logger.warning(f"Batch {batch_num}: Yahoo Finance returned no results on attempt {attempt}")
+                                if attempt < max_retries:
+                                    time.sleep(1)  # Wait 1 second between retries
+                                    continue
+                                else:
+                                    logger.warning(f"Batch {batch_num}: Yahoo Finance failed all {max_retries} attempts, falling back")
+                                    self._service_failure_counter[service_name] += 1
+                                    self._service_last_error[service_name] = 'No results after 3 attempts.'
+                        except Exception as e:
+                            logger.warning(f"Batch {batch_num}: Yahoo Finance attempt {attempt} failed with error: {e}")
+                            import traceback
+                            logger.warning(f"Batch {batch_num}: Yahoo Finance traceback: {traceback.format_exc()}")
+                            if attempt < max_retries:
+                                time.sleep(1)  # Wait 1 second between retries
+                                continue
+                            else:
+                                logger.warning(f"Batch {batch_num}: Yahoo Finance failed all {max_retries} attempts, falling back to next service")
+                                self._service_failure_counter[service_name] += 1
+                                self._service_last_error[service_name] = str(e)
+                                break
+                else:
+                    # Other services get one attempt
+                    try:
+                        results = service_func(tickers)
+                        if results:
+                            logger.info(f"Batch {batch_num}: {service_name} succeeded for {len(results)} tickers")
+                            self._service_success_counter[service_name] += 1
+                            return results
+                        else:
+                            logger.warning(f"Batch {batch_num}: {service_name} returned no results, falling back")
+                            self._service_failure_counter[service_name] += 1
+                            self._service_last_error[service_name] = 'No results.'
+                            logger.warning(f"Batch {batch_num}: {service_name} full response: {results}")
+                    except Exception as e:
+                        logger.warning(f"Batch {batch_num}: {service_name} failed with error: {e}. Falling back to next service.")
+                        import traceback
+                        logger.warning(f"Batch {batch_num}: {service_name} traceback: {traceback.format_exc()}")
+                        self._service_failure_counter[service_name] += 1
+                        self._service_last_error[service_name] = str(e)
+                        continue
             except Exception as e:
-                logger.warning(f"{service_name} failed for batch {batch_num}: {e}")
+                logger.warning(f"Batch {batch_num}: {service_name} failed with error: {e}. Falling back to next service.")
+                import traceback
+                logger.warning(f"Batch {batch_num}: {service_name} traceback: {traceback.format_exc()}")
+                self._service_failure_counter[service_name] += 1
+                self._service_last_error[service_name] = str(e)
                 continue
-        
-        logger.error(f"All services failed for batch {batch_num}")
+                
+        logger.error(f"Batch {batch_num}: All services failed for this batch. No price data available.")
         return {}
     
     def _get_fmp_batch_prices(self, tickers: List[str]) -> Dict[str, Dict]:
@@ -185,49 +261,49 @@ class BatchPriceProcessor:
             if not self.fmp_service:
                 logger.warning("FMP service not available, skipping batch")
                 return {}
-                
-            # FMP supports multiple quotes in one call
-            symbols = ','.join(tickers)
-            url = f"{self.fmp_service.base_url}/v3/quote/{symbols}"
-            params = {'apikey': self.fmp_service.api_key}
             
-            response = self.fmp_service._make_request(url, params)
-            return self._parse_fmp_batch_response(response, tickers)
+            # Small delay for FMP to be safe
+            time.sleep(0.5)
             
+            logger.info(f"[FMP DEBUG] Requesting batch quotes for: {tickers}")
+            response = self.fmp_service.fetch_batch_quotes(tickers)
+            logger.info(f"[FMP DEBUG] Raw response: {str(response)[:500]}")
+            results = self._parse_fmp_batch_response(response, tickers)
+            if not results:
+                logger.warning(f"[FMP DEBUG] No results returned for tickers: {tickers}")
+            return results
         except Exception as e:
-            logger.error(f"FMP batch request failed: {e}")
-            raise
-    
+            logger.error(f"[FMP DEBUG] FMP batch request failed: {str(e)}")
+            logger.error(f"[FMP DEBUG] Full traceback: {traceback.format_exc()}")
+            return {}
+
     def _get_yahoo_batch_prices(self, tickers: List[str]) -> Dict[str, Dict]:
-        """Get batch prices from Yahoo Finance (up to 100 symbols per call)"""
+        """Get batch prices from Yahoo Finance"""
         try:
             if not self.yahoo_service:
-                logger.warning("Yahoo Finance service not available, skipping batch")
+                logger.warning("Yahoo service not available, skipping batch")
                 return {}
-                
-            symbols = ','.join(tickers)
-            url = "https://query1.finance.yahoo.com/v7/finance/quote"
-            params = {
-                'symbols': symbols,
-                'fields': 'regularMarketPrice,regularMarketVolume,marketCap,regularMarketTime,regularMarketChange,regularMarketChangePercent'
-            }
             
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            return self._parse_yahoo_batch_response(response.json(), tickers)
+            # Reduced delay since Yahoo is no longer primary
+            time.sleep(1)
             
+            logger.info(f"[YAHOO DEBUG] Requesting batch quotes for: {tickers}")
+            results = self.yahoo_service.get_batch_prices(tickers)
+            logger.info(f"[YAHOO DEBUG] Raw response: {str(results)[:500]}")
+            if not results:
+                logger.warning(f"[YAHOO DEBUG] No results returned for tickers: {tickers}")
+            return results
         except Exception as e:
-            logger.error(f"Yahoo Finance batch request failed: {e}")
-            raise
-    
+            logger.error(f"[YAHOO DEBUG] Yahoo batch request failed: {str(e)}")
+            logger.error(f"[YAHOO DEBUG] Full traceback: {traceback.format_exc()}")
+            return {}
+
     def _get_alpha_vantage_batch_prices(self, tickers: List[str]) -> Dict[str, Dict]:
         """Get batch prices from Alpha Vantage"""
         try:
             if not self.alpha_vantage_service:
                 logger.warning("Alpha Vantage service not available, skipping batch")
                 return {}
-                
-            # Alpha Vantage has a batch quote endpoint
             symbols = ','.join(tickers)
             url = f"{self.alpha_vantage_service.base_url}/query"
             params = {
@@ -235,31 +311,29 @@ class BatchPriceProcessor:
                 'symbols': symbols,
                 'apikey': self.alpha_vantage_service.api_key
             }
-            
+            logger.info(f"[ALPHA VANTAGE DEBUG] Requesting: {url} with params: {params}")
             response = requests.get(url, params=params)
+            logger.info(f"[ALPHA VANTAGE DEBUG] Status: {response.status_code}, Response: {str(response.text)[:500]}")
             response.raise_for_status()
             return self._parse_alpha_vantage_batch_response(response.json(), tickers)
-            
         except Exception as e:
             logger.error(f"Alpha Vantage batch request failed: {e}")
+            import traceback
+            logger.error(f"[ALPHA VANTAGE DEBUG] Traceback: {traceback.format_exc()}")
             raise
-    
+
     def _get_finnhub_batch_prices(self, tickers: List[str]) -> Dict[str, Dict]:
         """Get batch prices from Finnhub"""
         try:
             if not self.finnhub_service:
                 logger.warning("Finnhub service not available, skipping batch")
                 return {}
-                
-            # Finnhub doesn't have a true batch endpoint, so we'll use concurrent requests
             results = {}
-            
             with ThreadPoolExecutor(max_workers=min(5, len(tickers))) as executor:
                 future_to_ticker = {
-                    executor.submit(self._get_single_finnhub_price, ticker): ticker 
+                    executor.submit(self._get_single_finnhub_price_with_delay, ticker): ticker 
                     for ticker in tickers
                 }
-                
                 for future in as_completed(future_to_ticker):
                     ticker = future_to_ticker[future]
                     try:
@@ -268,13 +342,11 @@ class BatchPriceProcessor:
                             results[ticker] = data
                     except Exception as e:
                         logger.error(f"Error getting Finnhub data for {ticker}: {e}")
-            
             return results
-            
         except Exception as e:
             logger.error(f"Finnhub batch request failed: {e}")
             raise
-    
+
     def _get_single_finnhub_price(self, ticker: str) -> Optional[Dict]:
         """Get single ticker price from Finnhub"""
         try:
@@ -302,6 +374,11 @@ class BatchPriceProcessor:
         except Exception as e:
             logger.error(f"Error getting Finnhub price for {ticker}: {e}")
             return None
+
+    def _get_single_finnhub_price_with_delay(self, ticker: str) -> Optional[Dict]:
+        """Get single ticker price from Finnhub with delay to avoid rate limit"""
+        time.sleep(1)  # 1 second delay per request
+        return self._get_single_finnhub_price(ticker)
     
     def _parse_fmp_batch_response(self, response: List[Dict], tickers: List[str]) -> Dict[str, Dict]:
         """Parse FMP batch response"""
@@ -380,83 +457,72 @@ class BatchPriceProcessor:
     def store_daily_prices(self, price_data: Dict[str, Dict]):
         """
         Store daily prices in the daily_charts table.
-        
         Args:
             price_data: Dictionary mapping ticker to price data
         """
         if not price_data:
             logger.warning("No price data to store")
             return
-        
         logger.info(f"Storing {len(price_data)} daily price records")
-        
         try:
-            # Prepare individual inserts (safer than batch for now)
             today = date.today()
             successful_inserts = 0
-            
             for ticker, data in price_data.items():
-                if data.get('close_price'):
+                if data.get('close'):
                     try:
-                        # Convert price to cents for storage
-                        close_price_cents = int(float(data.get('close_price')) * 100)
+                        close_val = float(data.get('close'))
+                        open_val = float(data.get('open', close_val))
+                        high_val = float(data.get('high', close_val))
+                        low_val = float(data.get('low', close_val))
                         volume = data.get('volume', 0) or 0
-                        
                         query = """
                         INSERT INTO daily_charts (
-                            ticker, date, open_price, high_price, low_price, 
-                            close_price, volume, data_source, created_at
+                            ticker, date, open, high, low, close, volume, data_source, created_at
                         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                         ON CONFLICT (ticker, date) 
                         DO UPDATE SET
-                            close_price = EXCLUDED.close_price,
+                            open = EXCLUDED.open,
+                            high = EXCLUDED.high,
+                            low = EXCLUDED.low,
+                            close = EXCLUDED.close,
                             volume = EXCLUDED.volume,
                             data_source = EXCLUDED.data_source,
                             updated_at = NOW()
                         """
-                        
                         values = (
                             ticker,
                             today,
-                            close_price_cents,  # Use close as open/high/low if not available
-                            close_price_cents,
-                            close_price_cents,
-                            close_price_cents,
+                            open_val,
+                            high_val,
+                            low_val,
+                            close_val,
                             volume,
                             data.get('data_source', 'batch_api')
                         )
-                        
                         self.db.execute_update(query, values)
                         successful_inserts += 1
-                        
                     except Exception as e:
                         logger.error(f"Error storing price for {ticker}: {e}")
                         continue
-            
             logger.info(f"Successfully stored {successful_inserts}/{len(price_data)} daily price records")
-            
-            # Update monitoring
             self.monitoring.record_metric('daily_prices_stored', successful_inserts)
-                
         except Exception as e:
             logger.error(f"Error storing daily prices: {e}")
             self.error_handler.handle_error(
                 "Failed to store daily prices", e, ErrorSeverity.HIGH
             )
-    
+
     def get_latest_daily_price(self, ticker: str) -> Optional[Dict]:
         """
         Get the latest daily price from daily_charts table.
-        
         Args:
             ticker: Ticker symbol
-            
         Returns:
             Latest price data or None
         """
         try:
             query = """
-            SELECT ticker, date, close_price, volume, data_source 
+            SELECT ticker, date, close, volume, data_source 
             FROM daily_charts 
             WHERE ticker = %s 
             ORDER BY date DESC 
@@ -464,41 +530,35 @@ class BatchPriceProcessor:
             """
             result = self.db.fetch_one(query, (ticker,))
             return dict(result) if result else None
-            
         except Exception as e:
             logger.error(f"Error getting latest daily price for {ticker}: {e}")
             return None
-    
+
     def get_daily_prices_for_date(self, tickers: List[str], target_date: date) -> Dict[str, Dict]:
         """
         Get daily prices for specific tickers on a specific date.
-        
         Args:
             tickers: List of ticker symbols
             target_date: Target date
-            
         Returns:
             Dictionary mapping ticker to price data
         """
         try:
             placeholders = ','.join(['%s'] * len(tickers))
             query = f"""
-            SELECT ticker, date, close_price, volume, data_source 
+            SELECT ticker, date, close, volume, data_source 
             FROM daily_charts 
             WHERE ticker IN ({placeholders}) AND date = %s
             """
-            
             params = tickers + [target_date]
             results = self.db.execute_query(query, params)
-            
             return {row[0]: {
                 'ticker': row[0],
                 'date': row[1], 
-                'close_price': row[2],
+                'close': row[2],
                 'volume': row[3],
                 'data_source': row[4]
             } for row in results}
-            
         except Exception as e:
             logger.error(f"Error getting daily prices for date {target_date}: {e}")
             return {}
