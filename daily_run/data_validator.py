@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, date
 import pandas as pd
 import numpy as np
-from error_handler import ErrorHandler, ErrorSeverity
+from daily_run.error_handler import ErrorHandler, ErrorSeverity
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ class DataValidator:
     
     def validate_technical_indicators(self, ticker: str, indicators: Dict[str, float]) -> Tuple[bool, List[str]]:
         """
-        Validate technical indicator values.
+        Validate technical indicator values with enhanced checks.
         
         Args:
             ticker: Stock ticker symbol
@@ -282,16 +282,20 @@ class DataValidator:
             # Validate RSI (0-100 range)
             if 'rsi_14' in indicators:
                 rsi = indicators['rsi_14']
-                if not (0 <= rsi <= 100):
+                if pd.isna(rsi) or np.isinf(rsi):
+                    errors.append(f"RSI has invalid value: {rsi}")
+                elif not (0 <= rsi <= 100):
                     errors.append(f"RSI {rsi} outside valid range [0, 100]")
             
             # Validate EMA values (should be positive for stock prices)
             for field in ['ema_20', 'ema_50']:
                 if field in indicators:
                     ema = indicators[field]
-                    if ema <= 0:
+                    if pd.isna(ema) or np.isinf(ema):
+                        errors.append(f"{field} has invalid value: {ema}")
+                    elif ema <= 0:
                         errors.append(f"{field} must be positive, got {ema}")
-                    if not self._is_in_range(ema, self.price_range):
+                    elif not self._is_in_range(ema, self.price_range):
                         errors.append(f"{field} {ema} outside reasonable price range {self.price_range}")
             
             # Validate MACD values (reasonable ranges)
@@ -299,13 +303,50 @@ class DataValidator:
             for field in macd_fields:
                 if field in indicators:
                     value = indicators[field]
-                    if abs(value) > 100:  # MACD shouldn't be extremely large
+                    if pd.isna(value) or np.isinf(value):
+                        errors.append(f"{field} has invalid value: {value}")
+                    elif abs(value) > 100:  # MACD shouldn't be extremely large
                         errors.append(f"{field} {value} seems unreasonably large")
             
-            # Check for NaN or infinite values
-            for field, value in indicators.items():
-                if pd.isna(value) or np.isinf(value):
-                    errors.append(f"{field} has invalid value: {value}")
+            # Validate Bollinger Bands (upper > middle > lower)
+            if all(field in indicators for field in ['bb_upper', 'bb_middle', 'bb_lower']):
+                bb_upper = indicators['bb_upper']
+                bb_middle = indicators['bb_middle']
+                bb_lower = indicators['bb_lower']
+                
+                if not (pd.isna(bb_upper) or pd.isna(bb_middle) or pd.isna(bb_lower)):
+                    if not (bb_upper >= bb_middle >= bb_lower):
+                        errors.append(f"Bollinger Bands order invalid: upper={bb_upper}, middle={bb_middle}, lower={bb_lower}")
+            
+            # Validate Stochastic (0-100 range)
+            for field in ['stoch_k', 'stoch_d']:
+                if field in indicators:
+                    stoch = indicators[field]
+                    if pd.isna(stoch) or np.isinf(stoch):
+                        errors.append(f"{field} has invalid value: {stoch}")
+                    elif not (0 <= stoch <= 100):
+                        errors.append(f"{field} {stoch} outside valid range [0, 100]")
+            
+            # Validate CCI (reasonable range)
+            if 'cci_20' in indicators:
+                cci = indicators['cci_20']
+                if pd.isna(cci) or np.isinf(cci):
+                    errors.append(f"CCI has invalid value: {cci}")
+                elif abs(cci) > 300:  # CCI shouldn't be extremely large
+                    errors.append(f"CCI {cci} seems unreasonably large")
+            
+            # Validate ATR (should be positive)
+            if 'atr_14' in indicators:
+                atr = indicators['atr_14']
+                if pd.isna(atr) or np.isinf(atr):
+                    errors.append(f"ATR has invalid value: {atr}")
+                elif atr < 0:
+                    errors.append(f"ATR must be non-negative, got {atr}")
+            
+            # Check for zero values that might indicate calculation failures
+            zero_count = sum(1 for value in indicators.values() if value == 0)
+            if zero_count > len(indicators) * 0.7:  # More than 70% are zero
+                errors.append(f"Too many zero values ({zero_count}/{len(indicators)}) - possible calculation failure")
             
             is_valid = len(errors) == 0
             

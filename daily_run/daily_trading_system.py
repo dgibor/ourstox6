@@ -668,15 +668,15 @@ class DailyTradingSystem:
                     # Get price data for technical calculations
                     price_data = self.db.get_price_data_for_technicals(ticker)
                     
-                    # Check if we have enough data for technical indicators (minimum 50 days for EMA 50)
-                    if not price_data or len(price_data) < 50:
+                    # Check if we have enough data for technical indicators (minimum 100 days for reliable calculations)
+                    if not price_data or len(price_data) < 100:
                         # Check if we have enough API calls remaining for historical data
                         remaining_calls = self.max_api_calls_per_day - self.api_calls_used
                         if remaining_calls > 0:
                             logger.info(f"Insufficient data for {ticker}: {len(price_data) if price_data else 0} days, fetching historical data (API calls remaining: {remaining_calls})")
                             
-                            # Fetch historical data to ensure minimum 100 days
-                            historical_result = self._get_historical_data_to_minimum(ticker, min_days=100)
+                            # Fetch historical data to ensure minimum 200 days for better reliability
+                            historical_result = self._get_historical_data_to_minimum(ticker, min_days=200)
                             if historical_result.get('success'):
                                 historical_fetches += 1
                                 # Get updated price data after fetching historical data
@@ -881,20 +881,20 @@ class DailyTradingSystem:
                 if len(df) >= 20:
                     from indicators.ema import calculate_ema
                     ema_20 = calculate_ema(df['close'], 20)
-                    if ema_20 is not None and len(ema_20) > 0 and not ema_20.iloc[-1] != ema_20.iloc[-1]:  # NaN check
+                    if ema_20 is not None and len(ema_20) > 0 and pd.notna(ema_20.iloc[-1]):
                         indicators['ema_20'] = float(ema_20.iloc[-1])
                         logger.debug(f"EMA 20 calculated for {ticker}: {indicators['ema_20']}")
                     else:
                         indicators['ema_20'] = 0.0
-                        logger.warning(f"EMA 20 could not be calculated for {ticker}: result was NaN or empty. Data points: {len(df)}")
+                        logger.warning(f"EMA 20 calculation failed for {ticker}: insufficient data or NaN result. Data points: {len(df)}")
                     if len(df) >= 50:
                         ema_50 = calculate_ema(df['close'], 50)
-                        if ema_50 is not None and len(ema_50) > 0 and not ema_50.iloc[-1] != ema_50.iloc[-1]:  # NaN check
+                        if ema_50 is not None and len(ema_50) > 0 and pd.notna(ema_50.iloc[-1]):
                             indicators['ema_50'] = float(ema_50.iloc[-1])
                             logger.debug(f"EMA 50 calculated for {ticker}: {indicators['ema_50']}")
                         else:
                             indicators['ema_50'] = 0.0
-                            logger.warning(f"EMA 50 could not be calculated for {ticker}: result was NaN or empty. Data points: {len(df)}")
+                            logger.warning(f"EMA 50 calculation failed for {ticker}: insufficient data or NaN result. Data points: {len(df)}")
                     else:
                         indicators['ema_50'] = 0.0
                         logger.warning(f"Insufficient data for EMA 50 for {ticker}: {len(df)} days < 50")
@@ -923,7 +923,7 @@ class DailyTradingSystem:
                             signal_val = signal_line.iloc[-1]
                             hist_val = histogram.iloc[-1]
                             
-                            if (macd_val == macd_val and signal_val == signal_val and hist_val == hist_val):  # NaN check
+                            if pd.notna(macd_val) and pd.notna(signal_val) and pd.notna(hist_val):
                                 indicators['macd_line'] = float(macd_val)
                                 indicators['macd_signal'] = float(signal_val)
                                 indicators['macd_histogram'] = float(hist_val)
@@ -1000,6 +1000,107 @@ class DailyTradingSystem:
             'stoch_k': 0.0,
             'stoch_d': 0.0
         }
+
+    def get_technical_data_quality_score(self, ticker: str) -> float:
+        """
+        Calculate technical data quality score (0-1) based on indicator completeness and validity.
+        
+        Args:
+            ticker: Stock ticker symbol
+            
+        Returns:
+            Quality score between 0 and 1
+        """
+        try:
+            # Get latest technical indicators from database
+            query = """
+            SELECT rsi_14, ema_20, ema_50, macd_line, macd_signal, macd_histogram,
+                   bb_upper, bb_middle, bb_lower, atr_14, cci_20, stoch_k, stoch_d
+            FROM daily_charts 
+            WHERE ticker = %s 
+            ORDER BY date DESC 
+            LIMIT 1
+            """
+            
+            result = self.db.fetch_one(query, (ticker,))
+            if not result:
+                return 0.0
+            
+            # Count valid indicators (non-zero, non-null values)
+            valid_count = 0
+            total_indicators = len(result)
+            
+            for value in result:
+                if value is not None and value != 0 and not pd.isna(value):
+                    valid_count += 1
+            
+            quality_score = valid_count / total_indicators if total_indicators > 0 else 0.0
+            
+            logger.debug(f"Technical data quality score for {ticker}: {quality_score:.2f} ({valid_count}/{total_indicators} valid)")
+            
+            return quality_score
+            
+        except Exception as e:
+            logger.error(f"Error calculating technical data quality score for {ticker}: {e}")
+            return 0.0
+
+    def get_technical_data_quality_summary(self) -> Dict[str, Any]:
+        """
+        Get a summary of technical data quality across all tickers.
+        
+        Returns:
+            Dictionary with quality statistics
+        """
+        try:
+            query = """
+            SELECT ticker, 
+                   COUNT(CASE WHEN rsi_14 > 0 THEN 1 END) as rsi_valid,
+                   COUNT(CASE WHEN ema_20 > 0 THEN 1 END) as ema_20_valid,
+                   COUNT(CASE WHEN ema_50 > 0 THEN 1 END) as ema_50_valid,
+                   COUNT(CASE WHEN macd_line != 0 THEN 1 END) as macd_valid,
+                   COUNT(*) as total_records
+            FROM daily_charts 
+            WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+            GROUP BY ticker
+            """
+            
+            results = self.db.fetch_all(query)
+            if not results:
+                return {'total_tickers': 0, 'average_quality': 0.0}
+            
+            quality_scores = []
+            for row in results:
+                ticker, rsi_valid, ema_20_valid, ema_50_valid, macd_valid, total_records = row
+                
+                if total_records > 0:
+                    # Calculate quality score for this ticker
+                    valid_indicators = sum([rsi_valid, ema_20_valid, ema_50_valid, macd_valid])
+                    quality_score = valid_indicators / (total_records * 4)  # 4 indicators per record
+                    quality_scores.append(quality_score)
+            
+            if quality_scores:
+                avg_quality = sum(quality_scores) / len(quality_scores)
+                high_quality_count = sum(1 for score in quality_scores if score >= 0.8)
+                low_quality_count = sum(1 for score in quality_scores if score < 0.5)
+                
+                return {
+                    'total_tickers': len(quality_scores),
+                    'average_quality': avg_quality,
+                    'high_quality_count': high_quality_count,
+                    'low_quality_count': low_quality_count,
+                    'quality_distribution': {
+                        'excellent': sum(1 for score in quality_scores if score >= 0.9),
+                        'good': sum(1 for score in quality_scores if 0.7 <= score < 0.9),
+                        'fair': sum(1 for score in quality_scores if 0.5 <= score < 0.7),
+                        'poor': sum(1 for score in quality_scores if score < 0.5)
+                    }
+                }
+            else:
+                return {'total_tickers': 0, 'average_quality': 0.0}
+                
+        except Exception as e:
+            logger.error(f"Error calculating technical data quality summary: {e}")
+            return {'total_tickers': 0, 'average_quality': 0.0, 'error': str(e)}
 
     def _populate_historical_data(self) -> Dict:
         """
@@ -1384,7 +1485,7 @@ class DailyTradingSystem:
                 }
             
             # Calculate how many more days we need
-            days_needed = min_days - current_days + 50  # Add buffer
+            days_needed = min_days - current_days + 100  # Add larger buffer for better reliability
             
             # Try FMP service first (most efficient for batch operations)
             try:
@@ -1441,6 +1542,94 @@ class DailyTradingSystem:
                 'success': False,
                 'api_calls': 1,
                 'days_added': 0,
+                'error': str(e)
+            }
+
+    def _batch_fetch_historical_data(self, tickers: List[str], min_days: int = 200) -> Dict:
+        """
+        Fetch historical data for multiple tickers in batches for better performance.
+        
+        Args:
+            tickers: List of ticker symbols
+            min_days: Minimum days of historical data required
+            
+        Returns:
+            Dictionary with batch processing results
+        """
+        try:
+            batch_size = 10  # Process 10 tickers at a time
+            total_successful = 0
+            total_failed = 0
+            total_api_calls = 0
+            
+            logger.info(f"Starting batch historical data fetch for {len(tickers)} tickers (batch size: {batch_size})")
+            
+            for i in range(0, len(tickers), batch_size):
+                batch = tickers[i:i + batch_size]
+                logger.info(f"Processing batch {i//batch_size + 1}: {batch}")
+                
+                batch_successful = 0
+                batch_failed = 0
+                batch_api_calls = 0
+                
+                for ticker in batch:
+                    try:
+                        # Check if we have enough API calls remaining
+                        remaining_calls = self.max_api_calls_per_day - self.api_calls_used
+                        if remaining_calls <= 0:
+                            logger.warning(f"No API calls remaining, stopping batch processing")
+                            break
+                        
+                        # Get historical data for this ticker
+                        result = self._get_historical_data_to_minimum(ticker, min_days)
+                        
+                        if result.get('success'):
+                            batch_successful += 1
+                            total_successful += 1
+                        else:
+                            batch_failed += 1
+                            total_failed += 1
+                        
+                        batch_api_calls += result.get('api_calls', 0)
+                        total_api_calls += result.get('api_calls', 0)
+                        
+                        # Small delay between tickers to respect rate limits
+                        time.sleep(0.1)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing {ticker} in batch: {e}")
+                        batch_failed += 1
+                        total_failed += 1
+                
+                # Update API call counter
+                self.api_calls_used += batch_api_calls
+                
+                logger.info(f"Batch {i//batch_size + 1} completed: {batch_successful} successful, {batch_failed} failed, {batch_api_calls} API calls")
+                
+                # Delay between batches to respect rate limits
+                if i + batch_size < len(tickers):
+                    time.sleep(1.0)
+            
+            result = {
+                'total_tickers': len(tickers),
+                'successful_fetches': total_successful,
+                'failed_fetches': total_failed,
+                'total_api_calls': total_api_calls,
+                'success_rate': total_successful / len(tickers) if tickers else 0.0
+            }
+            
+            logger.info(f"Batch historical data fetch completed: {total_successful}/{len(tickers)} successful ({result['success_rate']:.1%})")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in batch historical data fetch: {e}")
+            return {
+                'total_tickers': len(tickers),
+                'successful_fetches': 0,
+                'failed_fetches': len(tickers),
+                'total_api_calls': 0,
+                'success_rate': 0.0,
                 'error': str(e)
             }
 
