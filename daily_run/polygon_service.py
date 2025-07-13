@@ -316,6 +316,45 @@ class PolygonService:
         self.logger.info(f"Successfully processed {len(results)}/{len(tickers)} tickers")
         return results
     
+    def get_historical_data(self, ticker: str, days: int = 100) -> Optional[list]:
+        """
+        Fetch historical daily price data for a ticker from Polygon.io.
+        Args:
+            ticker: Stock ticker symbol
+            days: Number of days of data to fetch (default: 100)
+        Returns:
+            List of daily bar dicts, or None if failed
+        """
+        try:
+            if not self.api_key:
+                self.logger.error("No API key available for Polygon.io")
+                return None
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=days + 20)  # Add buffer for weekends/holidays
+            endpoint = f"v2/aggs/ticker/{ticker}/range/1/day/{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
+            params = {'adjusted': 'true', 'sort': 'asc', 'limit': days}
+            data = self._make_request(endpoint, **params)
+            if not data or 'results' not in data:
+                self.logger.warning(f"No historical data returned for {ticker} from Polygon.io")
+                return None
+            bars = data['results']
+            # Convert to standard format
+            result = []
+            for bar in bars[-days:]:
+                result.append({
+                    'date': datetime.fromtimestamp(bar['t'] / 1000).strftime('%Y-%m-%d'),
+                    'open': bar.get('o'),
+                    'high': bar.get('h'),
+                    'low': bar.get('l'),
+                    'close': bar.get('c'),
+                    'volume': bar.get('v'),
+                    'data_source': 'polygon'
+                })
+            return result if result else None
+        except Exception as e:
+            self.logger.error(f"Error fetching historical data for {ticker} from Polygon.io: {e}")
+            return None
+    
     def _format_address(self, address: Dict) -> Optional[str]:
         """Format address dictionary into string"""
         if not address:

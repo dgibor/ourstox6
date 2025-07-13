@@ -1464,8 +1464,24 @@ class DailyTradingSystem:
 
     def _get_historical_data_to_minimum(self, ticker: str, min_days: int = 100) -> Dict:
         """
-        Get historical data for a ticker to ensure minimum days requirement using optimized batch processing.
+        Get historical data for a ticker to ensure minimum days requirement using all available sources.
+        Fallback order: FMP → Yahoo → Polygon → Finnhub → AlphaVantage
+        Logs/report sources tried, days fetched, and final status.
         """
+        import json
+        from pathlib import Path
+        report_path = Path("logs/historical_data_fetch_report.json")
+        if not hasattr(self, '_historical_fetch_report'):
+            self._historical_fetch_report = {}
+        report = self._historical_fetch_report
+        result = {
+            'ticker': ticker,
+            'sources_tried': [],
+            'days_before': 0,
+            'days_after': 0,
+            'status': 'fail',
+            'details': []
+        }
         try:
             # Check current days available
             current_days_query = """
@@ -1475,74 +1491,83 @@ class DailyTradingSystem:
             """
             current_result = self.db.execute_query(current_days_query, (ticker,))
             current_days = current_result[0][0] if current_result else 0
-            
+            result['days_before'] = current_days
             if current_days >= min_days:
+                result['status'] = 'success'
+                result['days_after'] = current_days
+                report[ticker] = result
+                json.dump(report, open(report_path, 'w'), indent=2)
                 return {
                     'success': True,
                     'api_calls': 0,
                     'days_added': 0,
                     'reason': 'sufficient_data_exists'
                 }
-            
-            # Calculate how many more days we need
-            days_needed = min_days - current_days + 100  # Add larger buffer for better reliability
-            
-            # Try FMP service first (most efficient for batch operations)
-            try:
-                fmp_service = self.service_manager.get_service('fmp')
-                if fmp_service and hasattr(fmp_service, 'get_historical_data'):
-                    historical_data = fmp_service.get_historical_data(ticker, days=days_needed)
-                    if historical_data:
-                        # Store historical data
-                        self._store_historical_data(ticker, historical_data)
-                        return {
-                            'success': True,
-                            'api_calls': 1,
-                            'days_added': len(historical_data),
-                            'total_days_now': current_days + len(historical_data),
-                            'reason': 'fmp_historical_data'
-                        }
-            except Exception as e:
-                logger.debug(f"FMP historical data failed for {ticker}: {e}")
-            
-            # Fallback to Yahoo Finance
-            try:
-                service = self.service_manager.get_service('yahoo_finance')
-                historical_data = service.get_historical_data(ticker, days=days_needed)
-                
-                if historical_data:
-                    # Store historical data
-                    self._store_historical_data(ticker, historical_data)
-                    return {
-                        'success': True,
-                        'api_calls': 1,
-                        'days_added': len(historical_data),
-                        'total_days_now': current_days + len(historical_data),
-                        'reason': 'yahoo_historical_data'
-                    }
-                else:
-                    return {
-                        'success': False,
-                        'api_calls': 1,
-                        'days_added': 0,
-                        'error': 'no_data_returned'
-                    }
-            except Exception as e:
-                logger.error(f"Yahoo Finance historical data failed for {ticker}: {e}")
-                return {
-                    'success': False,
-                    'api_calls': 1,
-                    'days_added': 0,
-                    'error': str(e)
-                }
-                
+            days_needed = min_days - current_days + 20
+            sources = [
+                ('fmp', 'fmp', 'fmp_historical_data'),
+                ('yahoo_finance', 'yahoo', 'yahoo_historical_data'),
+                ('polygon', 'polygon', 'polygon_historical_data'),
+                ('finnhub', 'finnhub', 'finnhub_historical_data'),
+                ('alpha_vantage', 'alpha_vantage', 'alpha_vantage_historical_data')
+            ]
+            for service_name, log_name, reason in sources:
+                try:
+                    service = self.service_manager.get_service(service_name)
+                    if service and hasattr(service, 'get_historical_data'):
+                        historical_data = service.get_historical_data(ticker, days=days_needed)
+                        days_fetched = len(historical_data) if historical_data else 0
+                        result['sources_tried'].append({
+                            'source': log_name,
+                            'days_fetched': days_fetched
+                        })
+                        if historical_data:
+                            self._store_historical_data(ticker, historical_data)
+                            # Re-check days after storing
+                            new_result = self.db.execute_query(current_days_query, (ticker,))
+                            new_days = new_result[0][0] if new_result else 0
+                            result['days_after'] = new_days
+                            if new_days >= min_days:
+                                result['status'] = 'success'
+                                result['details'].append(f"Fetched {days_fetched} days from {log_name}")
+                                report[ticker] = result
+                                json.dump(report, open(report_path, 'w'), indent=2)
+                                return {
+                                    'success': True,
+                                    'api_calls': 1,
+                                    'days_added': days_fetched,
+                                    'total_days_now': new_days,
+                                    'reason': reason
+                                }
+                            else:
+                                result['details'].append(f"Fetched {days_fetched} days from {log_name}, still insufficient")
+                        else:
+                            result['details'].append(f"No data from {log_name}")
+                    else:
+                        result['details'].append(f"Service {log_name} not available or missing get_historical_data")
+                except Exception as e:
+                    result['details'].append(f"{log_name} error: {e}")
+            # If we get here, all sources failed or not enough data
+            result['status'] = 'partial' if result['days_after'] > 0 else 'fail'
+            report[ticker] = result
+            json.dump(report, open(report_path, 'w'), indent=2)
+            return {
+                'success': False,
+                'api_calls': len(sources),
+                'days_added': result['days_after'] - result['days_before'],
+                'error': 'not_enough_data',
+                'report': result
+            }
         except Exception as e:
-            logger.error(f"Error getting historical data to minimum for {ticker}: {e}")
+            result['details'].append(f"fatal error: {e}")
+            report[ticker] = result
+            json.dump(report, open(report_path, 'w'), indent=2)
             return {
                 'success': False,
                 'api_calls': 1,
                 'days_added': 0,
-                'error': str(e)
+                'error': str(e),
+                'report': result
             }
 
     def _batch_fetch_historical_data(self, tickers: List[str], min_days: int = 200) -> Dict:
@@ -1800,6 +1825,24 @@ class DailyTradingSystem:
             'phase_results': {},
             'summary': {'status': 'failed'}
         }
+
+    def remove_delisted_stock(self, ticker: str) -> bool:
+        """
+        Remove a delisted stock from the database, respecting foreign key constraints.
+        Deletes from company_fundamentals before stocks.
+        """
+        try:
+            # Delete from company_fundamentals first
+            delete_fundamentals = "DELETE FROM company_fundamentals WHERE ticker = %s"
+            self.db.execute_query(delete_fundamentals, (ticker,))
+            # Then delete from stocks
+            delete_stock = "DELETE FROM stocks WHERE ticker = %s"
+            self.db.execute_query(delete_stock, (ticker,))
+            logger.info(f"Successfully removed delisted stock {ticker} from company_fundamentals and stocks.")
+            return True
+        except Exception as e:
+            logger.error(f"Error removing delisted stock {ticker}: {e}")
+            return False
 
 
 def main():
