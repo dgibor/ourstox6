@@ -484,3 +484,241 @@ def validate_fundamental_data(ticker: str, fund_data: Dict[str, Any]) -> Tuple[b
 def validate_api_response(service_name: str, response: Any) -> Tuple[bool, List[str]]:
     """Convenience function for API response validation."""
     return data_validator.validate_api_response(service_name, response) 
+
+"""
+Data validation utilities for fundamental ratio calculations
+"""
+
+import logging
+from typing import Dict, Any, Optional, Union
+from decimal import Decimal, InvalidOperation
+
+logger = logging.getLogger(__name__)
+
+class FundamentalDataValidator:
+    """Validates fundamental data before ratio calculations"""
+    
+    @staticmethod
+    def validate_numeric(value: Any, field_name: str, allow_negative: bool = False) -> Optional[float]:
+        """
+        Safely convert value to float with validation
+        
+        Args:
+            value: Value to convert
+            field_name: Name of field for logging
+            allow_negative: Whether negative values are allowed
+            
+        Returns:
+            Float value or None if invalid
+        """
+        if value is None:
+            logger.warning(f"{field_name}: Value is None")
+            return None
+            
+        if isinstance(value, str):
+            # Handle common string representations
+            value = value.strip().upper()
+            if value in ['N/A', 'NA', '--', '', 'NULL']:
+                logger.warning(f"{field_name}: Value is {value}")
+                return None
+            try:
+                value = float(value)
+            except ValueError:
+                logger.error(f"{field_name}: Cannot convert '{value}' to float")
+                return None
+        
+        if not isinstance(value, (int, float, Decimal)):
+            logger.error(f"{field_name}: Invalid type {type(value)}")
+            return None
+            
+        # Convert to float
+        try:
+            float_value = float(value)
+        except (ValueError, TypeError, InvalidOperation):
+            logger.error(f"{field_name}: Conversion to float failed")
+            return None
+            
+        # Validate range
+        if not allow_negative and float_value < 0:
+            logger.warning(f"{field_name}: Negative value {float_value} not allowed")
+            return None
+            
+        if float_value == 0:
+            logger.warning(f"{field_name}: Zero value may cause division errors")
+            
+        return float_value
+    
+    @staticmethod
+    def validate_company_data(company_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate company data structure
+        
+        Args:
+            company_data: Raw company data
+            
+        Returns:
+            Validated company data
+        """
+        required_fields = ['ticker', 'current_price']
+        validated_data = {}
+        
+        # Check required fields
+        for field in required_fields:
+            if field not in company_data:
+                logger.error(f"Missing required field: {field}")
+                return {}
+                
+        # Validate ticker
+        ticker = company_data.get('ticker')
+        if not isinstance(ticker, str) or len(ticker.strip()) == 0:
+            logger.error("Invalid ticker symbol")
+            return {}
+        validated_data['ticker'] = ticker.strip().upper()
+        
+        # Validate current price
+        current_price = FundamentalDataValidator.validate_numeric(
+            company_data.get('current_price'), 'current_price', allow_negative=False
+        )
+        if current_price is None or current_price <= 0:
+            logger.error("Invalid current price")
+            return {}
+        validated_data['current_price'] = current_price
+        
+        # Optional fields
+        validated_data['company_name'] = company_data.get('company_name', '')
+        validated_data['fundamentals_last_update'] = company_data.get('fundamentals_last_update')
+        validated_data['next_earnings_date'] = company_data.get('next_earnings_date')
+        validated_data['data_priority'] = company_data.get('data_priority', 0)
+        
+        return validated_data
+    
+    @staticmethod
+    def validate_fundamental_data(fundamental_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate fundamental data structure
+        
+        Args:
+            fundamental_data: Raw fundamental data
+            
+        Returns:
+            Validated fundamental data
+        """
+        validated_data = {}
+        
+        # Required fields for ratio calculations
+        required_fields = [
+            'revenue', 'net_income', 'total_assets', 'total_equity', 
+            'shares_outstanding', 'eps_diluted'
+        ]
+        
+        for field in required_fields:
+            value = FundamentalDataValidator.validate_numeric(
+                fundamental_data.get(field), field, allow_negative=True
+            )
+            if value is None:
+                logger.warning(f"Missing or invalid {field}")
+            validated_data[field] = value
+        
+        # Optional fields
+        optional_fields = [
+            'gross_profit', 'operating_income', 'ebitda', 'book_value_per_share',
+            'total_debt', 'cash_and_equivalents', 'operating_cash_flow', 
+            'free_cash_flow', 'shares_float', 'inventory', 'accounts_receivable',
+            'accounts_payable', 'cost_of_goods_sold', 'retained_earnings'
+        ]
+        
+        for field in optional_fields:
+            value = FundamentalDataValidator.validate_numeric(
+                fundamental_data.get(field), field, allow_negative=True
+            )
+            validated_data[field] = value
+        
+        # Metadata fields
+        validated_data['ticker'] = fundamental_data.get('ticker', '')
+        validated_data['report_date'] = fundamental_data.get('report_date')
+        validated_data['period_type'] = fundamental_data.get('period_type', 'annual')
+        
+        return validated_data
+    
+    @staticmethod
+    def validate_historical_data(historical_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate historical data structure
+        
+        Args:
+            historical_data: Raw historical data
+            
+        Returns:
+            Validated historical data
+        """
+        if not historical_data:
+            return {}
+            
+        validated_data = {}
+        
+        # Historical fields for growth calculations
+        historical_fields = [
+            'revenue_previous', 'net_income_previous', 'free_cash_flow_previous',
+            'total_assets_previous', 'inventory_previous', 'accounts_receivable_previous',
+            'retained_earnings_previous'
+        ]
+        
+        for field in historical_fields:
+            value = FundamentalDataValidator.validate_numeric(
+                historical_data.get(field), field, allow_negative=True
+            )
+            validated_data[field] = value
+        
+        return validated_data
+    
+    @staticmethod
+    def validate_ratios(ratios: Dict[str, float]) -> Dict[str, float]:
+        """
+        Validate calculated ratios for reasonableness
+        
+        Args:
+            ratios: Raw calculated ratios
+            
+        Returns:
+            Validated ratios with outliers flagged
+        """
+        validated_ratios = {}
+        
+        # Reasonable ranges for common ratios
+        ratio_ranges = {
+            'pe_ratio': (0, 1000),  # P/E should be positive and reasonable
+            'pb_ratio': (0, 100),   # P/B should be positive
+            'ps_ratio': (0, 100),   # P/S should be positive
+            'roe': (-100, 100),     # ROE can be negative but not extreme
+            'roa': (-50, 50),       # ROA can be negative but not extreme
+            'roic': (-100, 100),    # ROIC can be negative but not extreme
+            'gross_margin': (-100, 100),  # Margins as percentages
+            'operating_margin': (-100, 100),
+            'net_margin': (-100, 100),
+            'debt_to_equity': (0, 100),   # Debt ratios should be positive
+            'current_ratio': (0, 100),    # Liquidity ratios should be positive
+            'quick_ratio': (0, 100),
+        }
+        
+        for ratio_name, ratio_value in ratios.items():
+            if ratio_value is None:
+                continue
+                
+            # Check if ratio is within reasonable range
+            if ratio_name in ratio_ranges:
+                min_val, max_val = ratio_ranges[ratio_name]
+                if ratio_value < min_val or ratio_value > max_val:
+                    logger.warning(f"{ratio_name}: Value {ratio_value} outside reasonable range [{min_val}, {max_val}]")
+                    # Still include the value but flag it
+                    
+            # Check for NaN or infinite values
+            if not isinstance(ratio_value, (int, float)) or math.isnan(ratio_value) or math.isinf(ratio_value):
+                logger.error(f"{ratio_name}: Invalid value {ratio_value}")
+                continue
+                
+            validated_ratios[ratio_name] = ratio_value
+        
+        return validated_ratios
+
+# Import math for NaN/inf checks
+import math 

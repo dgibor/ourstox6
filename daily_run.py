@@ -6,7 +6,7 @@ from datetime import datetime
 import pytz
 from dotenv import load_dotenv
 import psycopg2
-from daily_run.check_market_schedule import should_run_daily_process
+from daily_run.check_market_schedule import should_run_daily_update
 
 # Load environment variables
 load_dotenv()
@@ -70,7 +70,7 @@ def main(test_mode=False):
     # Check: Was the market open today? (Skip if in test mode)
     if not test_mode:
         logging.info("Checking if market was open today...")
-        should_run, reason = should_run_daily_process()
+        should_run, reason = should_run_daily_update(), "Market day check"
         
         if not should_run:
             logging.info(f"Exiting daily run - {reason}")
@@ -142,7 +142,15 @@ def main(test_mode=False):
         logging.error("Failed to calculate technical indicators.")
         sys.exit(1)
 
-    # Step 8: Remove delisted stocks (final cleanup)
+    # Step 8: Calculate fundamental ratios for companies with updated data
+    if not run_command(
+        "python daily_run/calculate_fundamental_ratios.py",
+        "Calculating fundamental ratios"
+    ):
+        logging.warning("Failed to calculate fundamental ratios (non-critical, continuing)")
+        # Don't exit on this failure as it's not critical to the main process
+
+    # Step 9: Remove delisted stocks (final cleanup)
     if not run_command(
         "python daily_run/remove_delisted.py",
         "Removing delisted stocks from database"
