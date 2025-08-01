@@ -331,7 +331,7 @@ class DatabaseManager:
         return self.fetch_all_dict(query, (ticker, days))
     
     def update_technical_indicators(self, ticker: str, indicators: Dict[str, float], target_date: str = None):
-        """Update technical indicators for a ticker"""
+        """Update technical indicators for a ticker - COMPREHENSIVE VERSION"""
         if not target_date:
             target_date = date.today().strftime('%Y-%m-%d')
         
@@ -340,23 +340,106 @@ class DatabaseManager:
         values = []
         
         indicator_columns = {
+            # Basic Technical Indicators
             'rsi_14': 'rsi_14',
             'ema_20': 'ema_20', 
             'ema_50': 'ema_50',
+            'ema_100': 'ema_100',
+            'ema_200': 'ema_200',
             'macd_line': 'macd_line',
             'macd_signal': 'macd_signal',
             'macd_histogram': 'macd_histogram',
+            
+            # Bollinger Bands
             'bb_upper': 'bb_upper',
             'bb_middle': 'bb_middle',
             'bb_lower': 'bb_lower',
+            
+            # Stochastic
+            'stoch_k': 'stoch_k',
+            'stoch_d': 'stoch_d',
+            
+            # Additional Indicators
             'atr_14': 'atr_14',
             'cci_20': 'cci_20',
-            'stoch_k': 'stoch_k',
-            'stoch_d': 'stoch_d'
+            'adx_14': 'adx_14',
+            'vwap': 'vwap',
+            'williams_r': 'williams_r',
+            
+            # Support & Resistance (Enhanced)
+            'pivot_point': 'pivot_point',
+            'pivot_fibonacci': 'pivot_fibonacci',
+            'pivot_camarilla': 'pivot_camarilla',
+            'pivot_woodie': 'pivot_woodie',
+            'pivot_demark': 'pivot_demark',
+            'resistance_1': 'resistance_1',
+            'resistance_2': 'resistance_2',
+            'resistance_3': 'resistance_3',
+            'support_1': 'support_1',
+            'support_2': 'support_2',
+            'support_3': 'support_3',
+            
+            # Swing Levels
+            'swing_high_5d': 'swing_high_5d',
+            'swing_low_5d': 'swing_low_5d',
+            'swing_high_10d': 'swing_high_10d',
+            'swing_low_10d': 'swing_low_10d',
+            'swing_high_20d': 'swing_high_20d',
+            'swing_low_20d': 'swing_low_20d',
+            
+            # Weekly/Monthly Levels
+            'week_high': 'week_high',
+            'week_low': 'week_low',
+            'month_high': 'month_high',
+            'month_low': 'month_low',
+            
+            # Nearest Levels
+            'nearest_support': 'nearest_support',
+            'nearest_resistance': 'nearest_resistance',
+            'nearest_fib_support': 'nearest_fib_support',
+            'nearest_fib_resistance': 'nearest_fib_resistance',
+            'nearest_psych_support': 'nearest_psych_support',
+            'nearest_psych_resistance': 'nearest_psych_resistance',
+            'nearest_volume_support': 'nearest_volume_support',
+            'nearest_volume_resistance': 'nearest_volume_resistance',
+            
+            # Strength Indicators
+            'support_strength': 'support_strength',
+            'resistance_strength': 'resistance_strength',
+            'volume_confirmation': 'volume_confirmation',
+            'swing_strengths': 'swing_strengths',
+            'level_type': 'level_type',
+            
+            # Fibonacci Levels
+            'fib_236': 'fib_236',
+            'fib_382': 'fib_382',
+            'fib_500': 'fib_500',
+            'fib_618': 'fib_618',
+            'fib_786': 'fib_786',
+            'fib_1272': 'fib_1272',
+            'fib_1618': 'fib_1618',
+            'fib_2618': 'fib_2618',
+            
+            # Dynamic Levels
+            'dynamic_resistance': 'dynamic_resistance',
+            'dynamic_support': 'dynamic_support',
+            'keltner_upper': 'keltner_upper',
+            'keltner_lower': 'keltner_lower',
+            
+            # Volume-weighted Levels
+            'volume_weighted_high': 'volume_weighted_high',
+            'volume_weighted_low': 'volume_weighted_low',
+            
+            # Volume Indicators
+            'obv': 'obv',
+            'vpt': 'vpt'
         }
         
         for indicator, value in indicators.items():
             if indicator in indicator_columns and value is not None:
+                # Convert float to integer for database storage (multiply by 100 to preserve precision)
+                if isinstance(value, float):
+                    value = int(value * 100)
                 update_fields.append(f"{indicator_columns[indicator]} = %s")
                 values.append(value)
         
@@ -368,9 +451,14 @@ class DatabaseManager:
             WHERE ticker = %s AND date = %s
             """
             
-            return self.execute_update(query, tuple(values))
+            try:
+                result = self.execute_update(query, tuple(values))
+                self.logger.info(f"Updated {len(update_fields)} technical indicators for {ticker}")
+                return result
+            except Exception as e:
+                self.logger.error(f"Failed to update technical indicators for {ticker}: {e}")
+                return 0
         return 0
-    
     def create_indexes_if_missing(self):
         """Create database indexes for better performance"""
         # Use separate connections for non-transactional index creation
