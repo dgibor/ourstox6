@@ -5,7 +5,7 @@ buildCommand = "pip install -r requirements.txt"
 [deploy]
 runtime = "V2"
 numReplicas = 1
-startCommand = "python test_startup.py && uvicorn dashboard_api:app --host 0.0.0.0 --port $PORT"
+startCommand = "uvicorn dashboard_api:app --host 0.0.0.0 --port $PORT"
 sleepApplication = true
 restartPolicyType = "NEVER"
 
@@ -15,10 +15,15 @@ PYTHONPATH = "/app:/app/daily_run"
 PYTHONUNBUFFERED = "1"
 TZ = "America/New_York"
 
-# Test cron job - runs every minute for testing
+# Test with original format - 10:05 PM UTC (5:05 PM ET after market close)
 [[cron]]
-schedule = "* * * * *"
-command = "python test_cron_simple.py"
+schedule = "5 22 * * *"
+command = "python test_original_format.py"
+
+# Backup test - 11:05 PM UTC (6:05 PM ET) in case primary fails
+[[cron]]
+schedule = "5 23 * * *"
+command = "python test_original_format.py"
 
 # Original cron jobs (commented out for testing)
 # Primary cron job - 10:05 PM UTC (5:05 PM ET after market close)
