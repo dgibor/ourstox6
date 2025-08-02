@@ -16,7 +16,7 @@ from psycopg2.extras import RealDictCursor
 # Add current directory to path
 sys.path.append(os.path.dirname(__file__))
 
-from improved_ratio_calculator_v5 import ImprovedRatioCalculatorV5
+from improved_ratio_calculator_v5_enhanced import EnhancedRatioCalculatorV5
 from database import DatabaseManager
 from error_handler import ErrorHandler, ErrorSeverity
 from monitoring import SystemMonitor
@@ -30,7 +30,7 @@ class DailyFundamentalRatioCalculator:
     
     def __init__(self, db_connection):
         self.db = db_connection
-        self.calculator = ImprovedRatioCalculatorV5()
+        self.calculator = EnhancedRatioCalculatorV5()
         self.error_handler = ErrorHandler("daily_fundamental_ratio_calculator")
         self.monitoring = SystemMonitor()
         

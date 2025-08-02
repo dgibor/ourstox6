@@ -22,10 +22,10 @@ def test_improved_ratio_calculator():
     
     try:
         # Import the calculator
-        from daily_run.improved_ratio_calculator_v5 import ImprovedRatioCalculatorV5
+        from daily_run.improved_ratio_calculator_v5_enhanced import EnhancedRatioCalculatorV5
         
         # Create calculator
-        calculator = ImprovedRatioCalculatorV5()
+        calculator = EnhancedRatioCalculatorV5()
         
         # Test data for AAPL
         fundamental_data = {
