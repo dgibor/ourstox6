@@ -15,15 +15,15 @@ PYTHONPATH = "/app:/app/daily_run"
 PYTHONUNBUFFERED = "1"
 TZ = "America/New_York"
 
-# Test with original format - 10:05 PM UTC (5:05 PM ET after market close)
+# Simple test cron job - 10:05 PM UTC (5:05 PM ET after market close)
 [[cron]]
 schedule = "5 22 * * *"
-command = "python test_original_format.py"
+command = "python test_manual.py"
 
 # Backup test - 11:05 PM UTC (6:05 PM ET) in case primary fails
 [[cron]]
 schedule = "5 23 * * *"
-command = "python test_original_format.py"
+command = "python test_manual.py"
 
 # Original cron jobs (commented out for testing)
 # Primary cron job - 10:05 PM UTC (5:05 PM ET after market close)
