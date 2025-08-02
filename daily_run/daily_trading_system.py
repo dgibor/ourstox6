@@ -141,7 +141,7 @@ class DailyTradingSystem:
             logger.info("📚 PRIORITY 3: Updating historical prices (100+ days minimum)")
             historical_result = self._ensure_minimum_historical_data()
             
-            # PRIORITY 4: Fill missing fundamental data
+            # PRIORITY 4: Fill missing fundamental data for companies
             logger.info("🔍 PRIORITY 4: Filling missing fundamental data")
             missing_fundamentals_result = self._fill_missing_fundamental_data()
             
@@ -818,192 +818,87 @@ class DailyTradingSystem:
 
     def _calculate_single_ticker_technicals(self, ticker: str, price_data: List[Dict]) -> Optional[Dict]:
         """
-        Calculate technical indicators for a single ticker with comprehensive error handling.
-        Returns None on any failure, ensuring the main process continues.
+        Calculate ALL technical indicators for a single ticker using comprehensive calculator.
+        Returns comprehensive dictionary with all calculated indicators.
         """
+        start_time = time.time()
+        
         try:
-            # Convert price data to proper format with error handling
-            try:
-                df = pd.DataFrame(price_data)
-                if df.empty:
-                    logger.warning(f"Empty price data for {ticker}")
-                    return None
-                    
-                df['date'] = pd.to_datetime(df['date'], errors='coerce')
-                df = df.dropna(subset=['date'])  # Remove rows with invalid dates
-                
-                if df.empty:
-                    logger.warning(f"No valid dates in price data for {ticker}")
-                    return None
-                
-                df.set_index('date', inplace=True)
-                df.sort_index(inplace=True)  # Sort by date ascending for calculations
-            except Exception as e:
-                logger.error(f"Failed to prepare price data for {ticker}: {e}")
-                return None
+            # Import the comprehensive calculator
+            import sys
+            sys.path.append('..')
+            from comprehensive_technical_indicators_fix import ComprehensiveTechnicalCalculator
             
-            # Convert prices from cents to dollars if needed with safe error handling
-            price_columns = ['open', 'high', 'low', 'close']
-            for col in price_columns:
-                if col in df.columns:
-                    try:
-                        # Check if values are in cents (> 1000 suggests cents)
-                        median_val = df[col].dropna().median()
-                        if median_val and median_val > 1000:
-                            df[col] = df[col] / 100.0
-                    except Exception as e:
-                        logger.warning(f"Failed to convert price column {col} for {ticker}: {e}")
-                        continue
+            # Create calculator instance
+            calculator = ComprehensiveTechnicalCalculator()
             
-            # Calculate indicators with comprehensive error handling
-            indicators = {}
+            # Calculate all indicators
+            indicators = calculator.calculate_all_indicators(ticker, price_data)
             
-            # RSI calculation with safe error handling
-            try:
-                if len(df) >= 14:
-                    from indicators.rsi import calculate_rsi
-                    rsi_result = calculate_rsi(df['close'])
-                    if rsi_result is not None and len(rsi_result) > 0 and not rsi_result.iloc[-1] != rsi_result.iloc[-1]:  # NaN check
-                        indicators['rsi_14'] = float(rsi_result.iloc[-1])
-                        logger.debug(f"RSI calculated for {ticker}: {indicators['rsi_14']}")
-                    else:
-                        indicators['rsi_14'] = 0.0
-                        logger.debug(f"RSI calculation returned invalid data for {ticker}")
-                else:
-                    indicators['rsi_14'] = 0.0
-                    logger.debug(f"Insufficient data for RSI calculation for {ticker}: {len(df)} days < 14")
-            except Exception as e:
-                logger.error(f"RSI calculation failed for {ticker}: {e}")
-                indicators['rsi_14'] = 0.0
+            calculation_time = time.time() - start_time
             
-            # EMA calculation with safe error handling
-            try:
-                if len(df) >= 20:
-                    from indicators.ema import calculate_ema
-                    ema_20 = calculate_ema(df['close'], 20)
-                    if ema_20 is not None and len(ema_20) > 0 and pd.notna(ema_20.iloc[-1]):
-                        indicators['ema_20'] = float(ema_20.iloc[-1])
-                        logger.debug(f"EMA 20 calculated for {ticker}: {indicators['ema_20']}")
-                    else:
-                        indicators['ema_20'] = 0.0
-                        logger.warning(f"EMA 20 calculation failed for {ticker}: insufficient data or NaN result. Data points: {len(df)}")
-                    if len(df) >= 50:
-                        ema_50 = calculate_ema(df['close'], 50)
-                        if ema_50 is not None and len(ema_50) > 0 and pd.notna(ema_50.iloc[-1]):
-                            indicators['ema_50'] = float(ema_50.iloc[-1])
-                            logger.debug(f"EMA 50 calculated for {ticker}: {indicators['ema_50']}")
-                        else:
-                            indicators['ema_50'] = 0.0
-                            logger.warning(f"EMA 50 calculation failed for {ticker}: insufficient data or NaN result. Data points: {len(df)}")
-                    else:
-                        indicators['ema_50'] = 0.0
-                        logger.warning(f"Insufficient data for EMA 50 for {ticker}: {len(df)} days < 50")
-                else:
-                    indicators['ema_20'] = 0.0
-                    indicators['ema_50'] = 0.0
-                    logger.warning(f"Insufficient data for EMA calculation for {ticker}: {len(df)} days < 20")
-            except Exception as e:
-                logger.error(f"EMA calculation failed for {ticker}: {e}")
-                indicators['ema_20'] = 0.0
-                indicators['ema_50'] = 0.0
-            
-            # MACD calculation with safe error handling
-            try:
-                if len(df) >= 26:
-                    from indicators.macd import calculate_macd
-                    macd_result = calculate_macd(df['close'])
-                    if macd_result and len(macd_result) == 3:
-                        macd_line, signal_line, histogram = macd_result
-                        if (macd_line is not None and len(macd_line) > 0 and
-                            signal_line is not None and len(signal_line) > 0 and
-                            histogram is not None and len(histogram) > 0):
-                            
-                            # Check for NaN values
-                            macd_val = macd_line.iloc[-1]
-                            signal_val = signal_line.iloc[-1]
-                            hist_val = histogram.iloc[-1]
-                            
-                            if pd.notna(macd_val) and pd.notna(signal_val) and pd.notna(hist_val):
-                                indicators['macd_line'] = float(macd_val)
-                                indicators['macd_signal'] = float(signal_val)
-                                indicators['macd_histogram'] = float(hist_val)
-                                logger.debug(f"MACD calculated for {ticker}")
-                            else:
-                                indicators['macd_line'] = 0.0
-                                indicators['macd_signal'] = 0.0
-                                indicators['macd_histogram'] = 0.0
-                                logger.debug(f"MACD calculation returned NaN values for {ticker}")
-                        else:
-                            indicators['macd_line'] = 0.0
-                            indicators['macd_signal'] = 0.0
-                            indicators['macd_histogram'] = 0.0
-                            logger.debug(f"MACD calculation returned invalid data for {ticker}")
-                    else:
-                        indicators['macd_line'] = 0.0
-                        indicators['macd_signal'] = 0.0
-                        indicators['macd_histogram'] = 0.0
-                        logger.debug(f"MACD calculation returned unexpected format for {ticker}")
-                else:
-                    indicators['macd_line'] = 0.0
-                    indicators['macd_signal'] = 0.0
-                    indicators['macd_histogram'] = 0.0
-                    logger.debug(f"Insufficient data for MACD calculation for {ticker}: {len(df)} days < 26")
-            except Exception as e:
-                logger.error(f"MACD calculation failed for {ticker}: {e}")
-                indicators['macd_line'] = 0.0
-                indicators['macd_signal'] = 0.0
-                indicators['macd_histogram'] = 0.0
-            
-            # Validate indicators with safe error handling
             if indicators:
-                try:
-                    is_valid, errors = data_validator.validate_technical_indicators(ticker, indicators)
-                    if is_valid:
-                        logger.debug(f"Successfully calculated {len(indicators)} indicators for {ticker}")
-                        return indicators
-                    else:
-                        logger.warning(f"Invalid indicators for {ticker}: {errors}")
-                        # Return zero indicators instead of None to ensure database consistency
-                        return self._get_zero_indicators_dict()
-                except Exception as e:
-                    logger.error(f"Indicator validation failed for {ticker}: {e}")
-                    return self._get_zero_indicators_dict()
+                logger.info(f"Calculated {len(indicators)} technical indicators for {ticker} in {calculation_time:.2f}s")
+                
+                # Monitor performance and alert on slow calculations
+                if calculation_time > 5.0:  # Alert if calculation takes > 5 seconds
+                    logger.warning(f"Slow calculation for {ticker}: {calculation_time:.2f}s")
+                elif calculation_time > 10.0:  # Critical alert if > 10 seconds
+                    logger.error(f"Critical slow calculation for {ticker}: {calculation_time:.2f}s")
+                
+                # Track performance metrics
+                self.metrics[f'{ticker}_calculation_time'] = calculation_time
+                self.metrics[f'{ticker}_indicators_calculated'] = len(indicators)
+                
+                return indicators
             else:
-                logger.warning(f"No indicators could be calculated for {ticker}")
-                return self._get_zero_indicators_dict()
-            
+                logger.warning(f"No technical indicators calculated for {ticker} in {calculation_time:.2f}s")
+                return None
+                
         except Exception as e:
-            logger.error(f"Error calculating technicals for {ticker}: {e}")
-            self.error_handler.handle_error(
-                f"Technical indicators calculation failed for {ticker}", e, ErrorSeverity.MEDIUM
-            )
-            # Return zero indicators instead of None
-            return self._get_zero_indicators_dict()
+            calculation_time = time.time() - start_time
+            logger.error(f"Error calculating technical indicators for {ticker} after {calculation_time:.2f}s: {e}")
+            return None
 
     def _get_zero_indicators_dict(self) -> Dict[str, float]:
         """
         Get a dictionary of all technical indicators set to zero.
         This ensures consistent database updates even when calculations fail.
         """
-        return {
-            'rsi_14': 0.0,
-            'ema_20': 0.0,
-            'ema_50': 0.0,
-            'macd_line': 0.0,
-            'macd_signal': 0.0,
-            'macd_histogram': 0.0,
-            'bb_upper': 0.0,
-            'bb_middle': 0.0,
-            'bb_lower': 0.0,
-            'atr_14': 0.0,
-            'cci_20': 0.0,
-            'stoch_k': 0.0,
-            'stoch_d': 0.0
-        }
+        try:
+            # Import the comprehensive calculator to get all indicator names
+            import sys
+            sys.path.append('..')
+            from comprehensive_technical_indicators_fix import ComprehensiveTechnicalCalculator
+            
+            calculator = ComprehensiveTechnicalCalculator()
+            all_indicators = calculator.get_all_indicator_names()
+            
+            # Create zero dictionary for all indicators
+            return {indicator: 0.0 for indicator in all_indicators}
+            
+        except Exception as e:
+            logger.error(f"Error getting zero indicators dictionary: {e}")
+            # Fallback to basic indicators if import fails
+            return {
+                'rsi_14': 0.0,
+                'ema_20': 0.0,
+                'ema_50': 0.0,
+                'macd_line': 0.0,
+                'macd_signal': 0.0,
+                'macd_histogram': 0.0,
+                'bb_upper': 0.0,
+                'bb_middle': 0.0,
+                'bb_lower': 0.0,
+                'atr_14': 0.0,
+                'cci_20': 0.0,
+                'stoch_k': 0.0,
+                'stoch_d': 0.0
+            }
 
     def get_technical_data_quality_score(self, ticker: str) -> float:
         """
-        Calculate technical data quality score (0-1) based on indicator completeness and validity.
+        Calculate technical data quality score (0-1) based on ALL indicator completeness and validity.
         
         Args:
             ticker: Stock ticker symbol
@@ -1012,10 +907,18 @@ class DailyTradingSystem:
             Quality score between 0 and 1
         """
         try:
-            # Get latest technical indicators from database
-            query = """
-            SELECT rsi_14, ema_20, ema_50, macd_line, macd_signal, macd_histogram,
-                   bb_upper, bb_middle, bb_lower, atr_14, cci_20, stoch_k, stoch_d
+            # Import the comprehensive calculator to get all indicator names
+            import sys
+            sys.path.append('..')
+            from comprehensive_technical_indicators_fix import ComprehensiveTechnicalCalculator
+            
+            calculator = ComprehensiveTechnicalCalculator()
+            all_indicators = calculator.get_all_indicator_names()
+            
+            # Build dynamic query for all indicators
+            indicator_list = ', '.join(all_indicators)
+            query = f"""
+            SELECT {indicator_list}
             FROM daily_charts 
             WHERE ticker = %s 
             ORDER BY date DESC 
@@ -1042,40 +945,73 @@ class DailyTradingSystem:
             
         except Exception as e:
             logger.error(f"Error calculating technical data quality score for {ticker}: {e}")
-            return 0.0
+            # Fallback to basic indicators if import fails
+            try:
+                fallback_query = """
+                SELECT rsi_14, ema_20, ema_50, macd_line, macd_signal, macd_histogram,
+                       bb_upper, bb_middle, bb_lower, atr_14, cci_20, stoch_k, stoch_d
+                FROM daily_charts 
+                WHERE ticker = %s 
+                ORDER BY date DESC 
+                LIMIT 1
+                """
+                
+                result = self.db.fetch_one(fallback_query, (ticker,))
+                if not result:
+                    return 0.0
+                
+                valid_count = sum(1 for value in result if value is not None and value != 0 and not pd.isna(value))
+                total_indicators = len(result)
+                
+                return valid_count / total_indicators if total_indicators > 0 else 0.0
+                
+            except Exception as fallback_error:
+                logger.error(f"Fallback quality score calculation failed for {ticker}: {fallback_error}")
+                return 0.0
 
     def get_technical_data_quality_summary(self) -> Dict[str, Any]:
         """
-        Get a summary of technical data quality across all tickers.
+        Get a summary of technical data quality across all tickers based on ALL indicators.
         
         Returns:
             Dictionary with quality statistics
         """
         try:
-            query = """
-            SELECT ticker, 
-                   COUNT(CASE WHEN rsi_14 > 0 THEN 1 END) as rsi_valid,
-                   COUNT(CASE WHEN ema_20 > 0 THEN 1 END) as ema_20_valid,
-                   COUNT(CASE WHEN ema_50 > 0 THEN 1 END) as ema_50_valid,
-                   COUNT(CASE WHEN macd_line != 0 THEN 1 END) as macd_valid,
-                   COUNT(*) as total_records
+            # Import the comprehensive calculator to get all indicator names
+            import sys
+            sys.path.append('..')
+            from comprehensive_technical_indicators_fix import ComprehensiveTechnicalCalculator
+            
+            calculator = ComprehensiveTechnicalCalculator()
+            all_indicators = calculator.get_all_indicator_names()
+            
+            # Build dynamic query for all indicators
+            indicator_checks = []
+            for indicator in all_indicators:
+                indicator_checks.append(f"COUNT(CASE WHEN {indicator} > 0 THEN 1 END) as {indicator}_valid")
+            
+            indicator_list = ', '.join(indicator_checks)
+            query = f"""
+            SELECT ticker, {indicator_list}, COUNT(*) as total_records
             FROM daily_charts 
             WHERE date >= CURRENT_DATE - INTERVAL '7 days'
             GROUP BY ticker
             """
             
-            results = self.db.fetch_all(query)
+            results = self.db.execute_query(query)
             if not results:
                 return {'total_tickers': 0, 'average_quality': 0.0}
             
             quality_scores = []
             for row in results:
-                ticker, rsi_valid, ema_20_valid, ema_50_valid, macd_valid, total_records = row
+                ticker = row[0]
+                total_records = row[-1]  # Last column is total_records
+                indicator_values = row[1:-1]  # All columns except ticker and total_records
                 
                 if total_records > 0:
                     # Calculate quality score for this ticker
-                    valid_indicators = sum([rsi_valid, ema_20_valid, ema_50_valid, macd_valid])
-                    quality_score = valid_indicators / (total_records * 4)  # 4 indicators per record
+                    valid_indicators = sum(indicator_values)
+                    quality_score = valid_indicators / (total_records * len(all_indicators))
                     quality_scores.append(quality_score)
             
             if quality_scores:
@@ -1100,7 +1036,46 @@ class DailyTradingSystem:
                 
         except Exception as e:
             logger.error(f"Error calculating technical data quality summary: {e}")
-            return {'total_tickers': 0, 'average_quality': 0.0, 'error': str(e)}
+            # Fallback to basic indicators if import fails
+            try:
+                fallback_query = """
+                SELECT ticker, 
+                       COUNT(CASE WHEN rsi_14 > 0 THEN 1 END) as rsi_valid,
+                       COUNT(CASE WHEN ema_20 > 0 THEN 1 END) as ema_20_valid,
+                       COUNT(CASE WHEN ema_50 > 0 THEN 1 END) as ema_50_valid,
+                       COUNT(CASE WHEN macd_line != 0 THEN 1 END) as macd_valid,
+                       COUNT(*) as total_records
+                FROM daily_charts 
+                WHERE date >= CURRENT_DATE - INTERVAL '7 days'
+                GROUP BY ticker
+                """
+                
+                results = self.db.execute_query(fallback_query)
+                if not results:
+                    return {'total_tickers': 0, 'average_quality': 0.0}
+                
+                quality_scores = []
+                for row in results:
+                    ticker, rsi_valid, ema_20_valid, ema_50_valid, macd_valid, total_records = row
+                    
+                    if total_records > 0:
+                        valid_indicators = sum([rsi_valid, ema_20_valid, ema_50_valid, macd_valid])
+                        quality_score = valid_indicators / (total_records * 4)
+                        quality_scores.append(quality_score)
+                
+                if quality_scores:
+                    avg_quality = sum(quality_scores) / len(quality_scores)
+                    return {
+                        'total_tickers': len(quality_scores),
+                        'average_quality': avg_quality,
+                        'note': 'Fallback calculation using basic indicators only'
+                    }
+                else:
+                    return {'total_tickers': 0, 'average_quality': 0.0}
+                    
+            except Exception as fallback_error:
+                logger.error(f"Fallback quality summary calculation failed: {fallback_error}")
+                return {'total_tickers': 0, 'average_quality': 0.0, 'error': str(e)}
 
     def _populate_historical_data(self) -> Dict:
         """
