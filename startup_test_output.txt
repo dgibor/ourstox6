@@ -1,0 +1,10 @@
+=== STARTUP TEST RUN AT 2025-08-02T16:22:16.148033 ===
+Current directory: C:\Users\david\David-Py\ourstox6
+Python version: 3.11.5 | packaged by Anaconda, Inc. | (main, Sep 11 2023, 13:26:23) [MSC v.1916 64 bit (AMD64)]
+Files in directory: 30
+Environment variables:
+  PYTHONPATH: NOT SET
+  TZ: NOT SET
+  DB_HOST: NOT SET
+=== END STARTUP TEST ===
+
