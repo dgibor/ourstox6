@@ -842,7 +842,7 @@ class DailyTradingSystem:
         try:
             # Import the comprehensive calculator
             import sys
-            sys.path.append('../utility_functions')
+            sys.path.append('utility_functions')
             from comprehensive_technical_indicators_fix import ComprehensiveTechnicalCalculator
             
             # Create calculator instance
@@ -884,7 +884,7 @@ class DailyTradingSystem:
         try:
             # Import the comprehensive calculator to get all indicator names
             import sys
-            sys.path.append('../utility_functions')
+            sys.path.append('utility_functions')
             from comprehensive_technical_indicators_fix import ComprehensiveTechnicalCalculator
             
             calculator = ComprehensiveTechnicalCalculator()
@@ -925,7 +925,7 @@ class DailyTradingSystem:
         try:
             # Import the comprehensive calculator to get all indicator names
             import sys
-            sys.path.append('../utility_functions')
+            sys.path.append('utility_functions')
             from comprehensive_technical_indicators_fix import ComprehensiveTechnicalCalculator
             
             calculator = ComprehensiveTechnicalCalculator()
@@ -995,7 +995,7 @@ class DailyTradingSystem:
         try:
             # Import the comprehensive calculator to get all indicator names
             import sys
-            sys.path.append('../utility_functions')
+            sys.path.append('utility_functions')
             from comprehensive_technical_indicators_fix import ComprehensiveTechnicalCalculator
             
             calculator = ComprehensiveTechnicalCalculator()

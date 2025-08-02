@@ -284,7 +284,7 @@ def insert_sector_history(conn, cur, ticker, hist_df):
                     low = EXCLUDED.low,
                     close = EXCLUDED.close,
                     volume = EXCLUDED.volume,
-                    updated_at = CURRENT_TIMESTAMP
+                    created_at = CURRENT_TIMESTAMP
             ''', (
                 ticker,
                 idx.strftime('%Y-%m-%d'),

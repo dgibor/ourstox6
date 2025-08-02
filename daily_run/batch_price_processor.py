@@ -489,7 +489,7 @@ class BatchPriceProcessor:
                             low = EXCLUDED.low,
                             close = EXCLUDED.close,
                             volume = EXCLUDED.volume,
-                            updated_at = NOW()
+                            created_at = NOW()
                         """
                         values = (
                             ticker,

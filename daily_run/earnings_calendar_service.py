@@ -327,7 +327,7 @@ class EarningsCalendarService:
                     actual_revenue = EXCLUDED.actual_revenue,
                     data_source = EXCLUDED.data_source,
                     confirmed = EXCLUDED.confirmed,
-                    updated_at = CURRENT_TIMESTAMP
+                    created_at = CURRENT_TIMESTAMP
             """, (
                 ticker,
                 earnings_data.get('company_name'),
@@ -374,7 +374,7 @@ class EarningsCalendarService:
                         WHEN earnings_date BETWEEN CURRENT_DATE + INTERVAL '91 days' AND CURRENT_DATE + INTERVAL '180 days' THEN 2
                         ELSE 1
                     END,
-                    updated_at = CURRENT_TIMESTAMP
+                    created_at = CURRENT_TIMESTAMP
                 WHERE earnings_date >= CURRENT_DATE
             """)
             
