@@ -8,22 +8,13 @@ numReplicas = 1
 startCommand = "uvicorn dashboard_api:app --host 0.0.0.0 --port $PORT"
 sleepApplication = true
 restartPolicyType = "NEVER"
+cronSchedule = "5 22 * * *"
 
 # Environment variables for the cron job
 [deploy.env]
 PYTHONPATH = "/app:/app/daily_run"
 PYTHONUNBUFFERED = "1"
 TZ = "America/New_York"
-
-# Simple test cron job - 10:05 PM UTC (5:05 PM ET after market close)
-[[cron]]
-schedule = "5 22 * * *"
-command = "python test_manual.py"
-
-# Backup test - 11:05 PM UTC (6:05 PM ET) in case primary fails
-[[cron]]
-schedule = "5 23 * * *"
-command = "python test_manual.py"
 
 # Original cron jobs (commented out for testing)
 # Primary cron job - 10:05 PM UTC (5:05 PM ET after market close)
