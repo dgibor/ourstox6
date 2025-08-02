@@ -107,20 +107,27 @@ class DailyTradingSystem:
         """
         self.start_time = time.time()
         logger.info("🚀 Starting Daily Trading System - Priority-Based Schema")
+        logger.info("📋 STEP-BY-STEP EXECUTION LOG:")
         
         try:
             # Check if it was a trading day
+            logger.info("🔍 STEP 1: Checking if today was a trading day...")
             trading_day_result = self._check_trading_day(force_run)
+            logger.info(f"✅ Trading day check completed: {trading_day_result['was_trading_day']}")
             
             # PRIORITY 1: Get price data for trading day, calculate technical indicators
             if trading_day_result['was_trading_day'] or force_run:
                 logger.info("📈 PRIORITY 1: Processing trading day - updating prices and technical indicators")
+                logger.info("💰 STEP 2: Starting stock price updates...")
                 
                 # Step 1a: Update daily prices for all stocks
                 price_result = self._update_daily_prices()
+                logger.info("✅ Stock price updates completed")
                 
+                logger.info("📈 STEP 3: Starting technical indicator calculations...")
                 # Step 1b: Calculate technical indicators based on updated prices
                 technical_result = self._calculate_technical_indicators_priority1()
+                logger.info("✅ Technical indicator calculations completed")
                 
                 priority1_result = {
                     'daily_prices': price_result,
@@ -135,20 +142,29 @@ class DailyTradingSystem:
             
             # PRIORITY 2: Update fundamental information for companies with earnings announcements
             logger.info("📊 PRIORITY 2: Updating fundamentals for companies with earnings announcements")
+            logger.info("📊 STEP 4: Starting earnings-based fundamental updates...")
             earnings_fundamentals_result = self._update_earnings_announcement_fundamentals()
+            logger.info("✅ Earnings-based fundamental updates completed")
             
             # PRIORITY 3: Update historical prices until 100+ days for every company
             logger.info("📚 PRIORITY 3: Updating historical prices (100+ days minimum)")
+            logger.info("📚 STEP 5: Starting historical data updates...")
             historical_result = self._ensure_minimum_historical_data()
+            logger.info("✅ Historical data updates completed")
             
             # PRIORITY 4: Fill missing fundamental data for companies
             logger.info("🔍 PRIORITY 4: Filling missing fundamental data")
+            logger.info("🔍 STEP 6: Starting missing fundamental data fill...")
             missing_fundamentals_result = self._fill_missing_fundamental_data()
+            logger.info("✅ Missing fundamental data fill completed")
             
             # Cleanup: Remove delisted stocks to prevent future API errors
+            logger.info("🧹 STEP 7: Starting cleanup of delisted stocks...")
             cleanup_result = self._cleanup_delisted_stocks()
+            logger.info("✅ Cleanup of delisted stocks completed")
             
             # Compile final results
+            logger.info("📊 STEP 8: Compiling final results...")
             results = self._compile_results({
                 'trading_day_check': trading_day_result,
                 'priority_1_trading_day': priority1_result,

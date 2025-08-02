@@ -328,13 +328,15 @@ class DailyFundamentalRatioCalculator:
         Returns:
             Dictionary with processing results
         """
-        logger.info("Starting daily fundamental ratio calculations")
+        logger.info("📊 FUNDAMENTAL RATIO CALCULATIONS STARTED")
+        logger.info("🔍 STEP 1: Getting companies needing ratio updates...")
         
         # Get companies needing updates
         companies = self.get_companies_needing_ratio_updates()
+        logger.info(f"✅ Found {len(companies)} companies needing ratio updates")
         
         if not companies:
-            logger.info("No companies need ratio updates")
+            logger.info("ℹ️ No companies need ratio updates")
             return {
                 'total_processed': 0,
                 'successful': 0,
@@ -350,17 +352,23 @@ class DailyFundamentalRatioCalculator:
         }
         
         # Process each company
-        for company in companies:
+        logger.info(f"📈 STEP 2: Processing {len(companies)} companies...")
+        for i, company in enumerate(companies, 1):
+            logger.info(f"📊 Processing company {i}/{len(companies)}: {company.get('ticker', 'Unknown')}")
             result = self.calculate_ratios_for_company(company)
             
             if result['status'] == 'success':
                 results['successful'] += 1
+                logger.info(f"✅ Successfully calculated ratios for {company.get('ticker', 'Unknown')}")
             else:
                 results['failed'] += 1
                 results['errors'].append({
                     'ticker': result['ticker'],
                     'error': result.get('error', 'Unknown error')
                 })
+                logger.warning(f"❌ Failed to calculate ratios for {company.get('ticker', 'Unknown')}: {result.get('error', 'Unknown error')}")
+        
+        logger.info(f"✅ STEP 3: Completed processing all companies")
         
         # Log summary with enhanced details
         logger.info(f"📊 FUNDAMENTAL RATIO CALCULATION SUMMARY:")
