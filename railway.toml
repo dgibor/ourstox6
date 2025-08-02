@@ -18,9 +18,9 @@ TZ = "America/New_York"
 # Primary cron job - 10:05 PM UTC (5:05 PM ET after market close)
 [[cron]]
 schedule = "5 22 * * *"
-command = "python run_daily_cron.py"
+command = "python run_daily_cron_test.py"
 
 # Backup cron job - 11:05 PM UTC (6:05 PM ET) in case primary fails
 [[cron]]
 schedule = "5 23 * * *"
-command = "python run_daily_cron.py --backup" 
+command = "python run_daily_cron_test.py" 
