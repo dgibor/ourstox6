@@ -11,7 +11,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, date, timedelta
 import psycopg2
-from psycopg2.extras import RealDictCursor
+
 
 # Add current directory to path
 sys.path.append(os.path.dirname(__file__))
@@ -49,7 +49,7 @@ class DailyFundamentalRatioCalculator:
             SELECT DISTINCT 
                 s.ticker,
                 s.company_name,
-                s.current_price,
+                (SELECT close FROM daily_charts WHERE ticker = s.ticker ORDER BY date DESC LIMIT 1) as current_price,
                 s.fundamentals_last_update,
                 s.next_earnings_date,
                 s.data_priority,
@@ -60,7 +60,7 @@ class DailyFundamentalRatioCalculator:
                 FROM financial_ratios
                 GROUP BY ticker
             ) fr ON s.ticker = fr.ticker
-            WHERE s.current_price > 0
+            WHERE (SELECT close FROM daily_charts WHERE ticker = s.ticker ORDER BY date DESC LIMIT 1) > 0
             AND s.fundamentals_last_update IS NOT NULL
             AND (
                 -- Companies with no ratio calculations
@@ -79,9 +79,7 @@ class DailyFundamentalRatioCalculator:
             LIMIT 100
             """
             
-            with self.db.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query)
-                companies = cursor.fetchall()
+            companies = self.db.fetch_all_dict(query)
                 
             logger.info(f"Found {len(companies)} companies needing ratio updates")
             return companies
@@ -107,20 +105,19 @@ class DailyFundamentalRatioCalculator:
             query = """
             SELECT 
                 cf.*,
-                s.current_price,
-                s.shares_outstanding
+                s.shares_outstanding,
+                (SELECT close FROM daily_charts WHERE ticker = cf.ticker ORDER BY date DESC LIMIT 1) as current_price
             FROM company_fundamentals cf
             JOIN stocks s ON cf.ticker = s.ticker
-            WHERE cf.ticker = %s
-            AND cf.period_type = 'annual'
+                    WHERE cf.ticker = %s
+        AND cf.period_type = 'ttm'
             ORDER BY cf.report_date DESC
             LIMIT 1
             """
             
-            with self.db.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, (ticker,))
-                result = cursor.fetchone()
-                
+            results = self.db.fetch_all_dict(query, (ticker,))
+            result = results[0] if results else None
+            
             if result:
                 # Convert to regular dict and handle numeric types
                 fundamental_data = dict(result)
@@ -151,20 +148,18 @@ class DailyFundamentalRatioCalculator:
             SELECT 
                 revenue as revenue_previous,
                 total_assets as total_assets_previous,
-                inventory as inventory_previous,
-                accounts_receivable as accounts_receivable_previous,
-                retained_earnings as retained_earnings_previous
+                net_income as net_income_previous,
+                free_cash_flow as free_cash_flow_previous
             FROM company_fundamentals
             WHERE ticker = %s
-            AND period_type = 'annual'
+            AND period_type = 'ttm'
             ORDER BY report_date DESC
             LIMIT 1 OFFSET 1
             """
             
-            with self.db.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, (ticker,))
-                result = cursor.fetchone()
-                
+            results = self.db.fetch_all_dict(query, (ticker,))
+            result = results[0] if results else None
+            
             if result:
                 historical_data = dict(result)
                 for key, value in historical_data.items():
@@ -270,8 +265,7 @@ class DailyFundamentalRatioCalculator:
             WHERE ticker = %s AND calculation_date = CURRENT_DATE
             """
             
-            with self.db.cursor() as cursor:
-                cursor.execute(delete_query, (ticker,))
+            self.db.execute_update(delete_query, (ticker,))
             
             # Insert new ratios
             insert_query = """
@@ -310,15 +304,11 @@ class DailyFundamentalRatioCalculator:
                 ratios.get('market_cap'), ratios.get('enterprise_value'), ratios.get('graham_number')
             )
             
-            with self.db.cursor() as cursor:
-                cursor.execute(insert_query, values)
-            
-            self.db.commit()
+            self.db.execute_update(insert_query, values)
             return True
             
         except Exception as e:
             logger.error(f"Error storing ratios for {ticker}: {e}")
-            self.db.rollback()
             return False
     
     def process_all_companies(self) -> Dict:

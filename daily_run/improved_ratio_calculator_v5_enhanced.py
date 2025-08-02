@@ -5,7 +5,7 @@ Enhanced Ratio Calculator V5 - With improved error handling and partial results
 import logging
 import math
 from typing import Dict, Optional, List, Tuple
-from daily_run.data_validator import FundamentalDataValidator
+from data_validator import FundamentalDataValidator
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,16 @@ class EnhancedRatioCalculatorV5:
             try:
                 # Check if we have minimum required data
                 if self._has_minimum_data(validated_fundamental, dependencies):
-                    ratios = method(ticker, validated_fundamental, current_price, validated_historical)
+                    # Call method with correct parameters based on signature
+                    if category == 'profitability':
+                        ratios = method(ticker, validated_fundamental)
+                    elif category == 'quality':
+                        ratios = method(ticker, validated_fundamental)
+                    elif category in ['efficiency', 'growth']:
+                        ratios = method(ticker, validated_fundamental, validated_historical)
+                    else:
+                        ratios = method(ticker, validated_fundamental, current_price)
+                    
                     if ratios:
                         all_ratios.update(ratios)
                         logger.debug(f"{ticker}: Calculated {len(ratios)} {category} ratios")
@@ -212,22 +221,8 @@ class EnhancedRatioCalculatorV5:
             if debt_equity is not None:
                 ratios['debt_to_equity'] = debt_equity
         
-        # Current Ratio
-        current_assets = fundamental_data.get('current_assets')
-        current_liabilities = fundamental_data.get('current_liabilities')
-        if current_assets and current_liabilities and current_liabilities > 0:
-            current_ratio = self._safe_division(current_assets, current_liabilities, 'Current ratio')
-            if current_ratio is not None:
-                ratios['current_ratio'] = current_ratio
-        
-        # Quick Ratio
-        if current_assets and current_liabilities and current_liabilities > 0:
-            inventory = fundamental_data.get('inventory', 0)
-            quick_assets = current_assets - inventory
-            if quick_assets > 0:
-                quick_ratio = self._safe_division(quick_assets, current_liabilities, 'Quick ratio')
-                if quick_ratio is not None:
-                    ratios['quick_ratio'] = quick_ratio
+        # Note: Current ratio and quick ratio require current_assets and current_liabilities
+        # which don't exist in the current database schema, so we skip them for now
         
         # Interest Coverage
         operating_income = fundamental_data.get('operating_income')
@@ -236,10 +231,6 @@ class EnhancedRatioCalculatorV5:
             interest_coverage = self._safe_division(operating_income, interest_expense, 'Interest coverage')
             if interest_coverage is not None:
                 ratios['interest_coverage'] = interest_coverage
-        
-        # Altman Z-Score (simplified)
-        # This requires more complex calculation, skipping for now
-        # ratios['altman_z_score'] = self._calculate_altman_z_score(fundamental_data)
         
         return ratios
     
@@ -255,20 +246,8 @@ class EnhancedRatioCalculatorV5:
             if asset_turnover is not None:
                 ratios['asset_turnover'] = asset_turnover
         
-        # Inventory Turnover
-        cost_of_goods = fundamental_data.get('cost_of_goods_sold')
-        inventory = fundamental_data.get('inventory')
-        if cost_of_goods and inventory and inventory > 0:
-            inventory_turnover = self._safe_division(cost_of_goods, inventory, 'Inventory turnover')
-            if inventory_turnover is not None:
-                ratios['inventory_turnover'] = inventory_turnover
-        
-        # Receivables Turnover
-        accounts_receivable = fundamental_data.get('accounts_receivable')
-        if revenue and accounts_receivable and accounts_receivable > 0:
-            receivables_turnover = self._safe_division(revenue, accounts_receivable, 'Receivables turnover')
-            if receivables_turnover is not None:
-                ratios['receivables_turnover'] = receivables_turnover
+        # Note: Inventory turnover and receivables turnover require columns that don't exist
+        # in the current database schema, so we skip them for now
         
         return ratios
     

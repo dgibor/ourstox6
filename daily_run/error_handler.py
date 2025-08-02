@@ -62,4 +62,8 @@ class ErrorHandler:
             self.log_error(f"Invalid {data_type}: data is empty", ErrorSeverity.WARNING)
             return False
         
-        return True 
+        return True
+    
+    def handle_error(self, error: Exception, context: Optional[Dict[str, Any]] = None):
+        """Handle an error with logging (alias for handle_exception)"""
+        self.handle_exception(error, context) 
