@@ -149,7 +149,10 @@ class DailyFundamentalRatioCalculator:
                 revenue as revenue_previous,
                 total_assets as total_assets_previous,
                 net_income as net_income_previous,
-                free_cash_flow as free_cash_flow_previous
+                free_cash_flow as free_cash_flow_previous,
+                cost_of_goods_sold as cost_of_goods_sold_previous,
+                current_assets as current_assets_previous,
+                current_liabilities as current_liabilities_previous
             FROM company_fundamentals
             WHERE ticker = %s
             AND period_type = 'ttm'
@@ -157,21 +160,23 @@ class DailyFundamentalRatioCalculator:
             LIMIT 1 OFFSET 1
             """
             
-            results = self.db.fetch_all_dict(query, (ticker,))
-            result = results[0] if results else None
+            result = self.db.fetch_one(query, (ticker,))
             
             if result:
-                historical_data = dict(result)
-                for key, value in historical_data.items():
-                    if isinstance(value, (int, float)) and value is not None:
-                        historical_data[key] = float(value)
-                return historical_data
-            else:
-                logger.warning(f"No historical fundamental data found for {ticker}")
-                return None
-                
+                return {
+                    'revenue_previous': result[0],
+                    'total_assets_previous': result[1],
+                    'net_income_previous': result[2],
+                    'free_cash_flow_previous': result[3],
+                    'cost_of_goods_sold_previous': result[4],
+                    'current_assets_previous': result[5],
+                    'current_liabilities_previous': result[6]
+                }
+            
+            return None
+            
         except Exception as e:
-            logger.error(f"Error getting historical data for {ticker}: {e}")
+            self.error_handler.handle_exception(e, {'ticker': ticker, 'operation': 'get_historical_fundamental_data'})
             return None
     
     def calculate_ratios_for_company(self, company_data: Dict) -> Dict:
@@ -377,8 +382,7 @@ class DailyFundamentalRatioCalculator:
         # Update monitoring
         self.monitoring.record_metric(
             'fundamental_ratios_calculated',
-            results['successful'],
-            {'total_processed': results['total_processed']}
+            results['successful']
         )
         
         return results

@@ -33,9 +33,9 @@ class EnhancedRatioCalculatorV5:
         # Define calculation methods with their dependencies
         calculation_methods = [
             ('valuation', self._calculate_valuation_ratios, ['eps_diluted', 'book_value_per_share', 'revenue', 'shares_outstanding']),
-            ('profitability', self._calculate_profitability_ratios, ['net_income', 'total_equity', 'total_assets', 'revenue']),
-            ('financial_health', self._calculate_financial_health_ratios, ['total_debt', 'total_equity', 'current_assets', 'current_liabilities']),
-            ('efficiency', self._calculate_efficiency_ratios, ['revenue', 'total_assets']),
+            ('profitability', self._calculate_profitability_ratios, ['net_income', 'total_equity', 'total_assets', 'revenue', 'cost_of_goods_sold', 'operating_income']),
+            ('financial_health', self._calculate_financial_health_ratios, ['total_debt', 'total_equity', 'current_assets', 'current_liabilities', 'inventory']),
+            ('efficiency', self._calculate_efficiency_ratios, ['revenue', 'total_assets', 'inventory', 'cost_of_goods_sold', 'accounts_receivable']),
             ('growth', self._calculate_growth_metrics, ['revenue']),
             ('quality', self._calculate_quality_metrics, ['free_cash_flow', 'net_income']),
             ('market', self._calculate_market_data, ['shares_outstanding']),
@@ -160,52 +160,51 @@ class EnhancedRatioCalculatorV5:
         """Calculate profitability ratios with enhanced error handling"""
         ratios = {}
         
-        # ROE
+        # Return on Equity (ROE)
         net_income = fundamental_data.get('net_income')
         total_equity = fundamental_data.get('total_equity')
-        if net_income is not None and total_equity and total_equity > 0:
+        if net_income and total_equity and total_equity > 0:
             roe = self._safe_division(net_income, total_equity, 'ROE')
             if roe is not None:
-                ratios['roe'] = roe * 100  # Convert to percentage
+                ratios['return_on_equity'] = roe
         
-        # ROA
+        # Return on Assets (ROA)
         total_assets = fundamental_data.get('total_assets')
-        if net_income is not None and total_assets and total_assets > 0:
+        if net_income and total_assets and total_assets > 0:
             roa = self._safe_division(net_income, total_assets, 'ROA')
             if roa is not None:
-                ratios['roa'] = roa * 100  # Convert to percentage
+                ratios['return_on_assets'] = roa
         
-        # ROIC
+        # Return on Invested Capital (ROIC)
+        operating_income = fundamental_data.get('operating_income')
         total_debt = fundamental_data.get('total_debt', 0)
-        if net_income is not None and total_equity and total_equity > 0:
-            invested_capital = total_equity + total_debt
+        total_equity = fundamental_data.get('total_equity')
+        if operating_income and total_assets and total_debt and total_equity:
+            invested_capital = total_assets - total_debt + total_equity
             if invested_capital > 0:
-                roic = self._safe_division(net_income, invested_capital, 'ROIC')
+                roic = self._safe_division(operating_income, invested_capital, 'ROIC')
                 if roic is not None:
-                    ratios['roic'] = roic * 100  # Convert to percentage
+                    ratios['return_on_invested_capital'] = roic
         
-        # Margins
+        # Gross Margin
         revenue = fundamental_data.get('revenue')
-        if revenue and revenue > 0:
-            # Gross Margin
-            gross_profit = fundamental_data.get('gross_profit')
-            if gross_profit is not None:
-                gross_margin = self._safe_division(gross_profit, revenue, 'Gross margin')
-                if gross_margin is not None:
-                    ratios['gross_margin'] = gross_margin * 100
-            
-            # Operating Margin
-            operating_income = fundamental_data.get('operating_income')
-            if operating_income is not None:
-                operating_margin = self._safe_division(operating_income, revenue, 'Operating margin')
-                if operating_margin is not None:
-                    ratios['operating_margin'] = operating_margin * 100
-            
-            # Net Margin
-            if net_income is not None:
-                net_margin = self._safe_division(net_income, revenue, 'Net margin')
-                if net_margin is not None:
-                    ratios['net_margin'] = net_margin * 100
+        cost_of_goods_sold = fundamental_data.get('cost_of_goods_sold')
+        if revenue and cost_of_goods_sold and revenue > 0:
+            gross_margin = self._safe_division(revenue - cost_of_goods_sold, revenue, 'Gross margin')
+            if gross_margin is not None:
+                ratios['gross_margin'] = gross_margin
+        
+        # Operating Margin
+        if operating_income and revenue and revenue > 0:
+            operating_margin = self._safe_division(operating_income, revenue, 'Operating margin')
+            if operating_margin is not None:
+                ratios['operating_margin'] = operating_margin
+        
+        # Net Margin
+        if net_income and revenue and revenue > 0:
+            net_margin = self._safe_division(net_income, revenue, 'Net margin')
+            if net_margin is not None:
+                ratios['net_margin'] = net_margin
         
         return ratios
     
@@ -221,16 +220,21 @@ class EnhancedRatioCalculatorV5:
             if debt_equity is not None:
                 ratios['debt_to_equity'] = debt_equity
         
-        # Note: Current ratio and quick ratio require current_assets and current_liabilities
-        # which don't exist in the current database schema, so we skip them for now
+        # Current Ratio
+        current_assets = fundamental_data.get('current_assets')
+        current_liabilities = fundamental_data.get('current_liabilities')
+        if current_assets and current_liabilities and current_liabilities > 0:
+            current_ratio = self._safe_division(current_assets, current_liabilities, 'Current ratio')
+            if current_ratio is not None:
+                ratios['current_ratio'] = current_ratio
         
-        # Interest Coverage
-        operating_income = fundamental_data.get('operating_income')
-        interest_expense = fundamental_data.get('interest_expense')
-        if operating_income and interest_expense and interest_expense > 0:
-            interest_coverage = self._safe_division(operating_income, interest_expense, 'Interest coverage')
-            if interest_coverage is not None:
-                ratios['interest_coverage'] = interest_coverage
+        # Quick Ratio (Acid Test)
+        inventory = fundamental_data.get('inventory', 0)
+        if current_assets and current_liabilities and current_liabilities > 0:
+            quick_assets = current_assets - inventory
+            quick_ratio = self._safe_division(quick_assets, current_liabilities, 'Quick ratio')
+            if quick_ratio is not None:
+                ratios['quick_ratio'] = quick_ratio
         
         return ratios
     
@@ -246,8 +250,20 @@ class EnhancedRatioCalculatorV5:
             if asset_turnover is not None:
                 ratios['asset_turnover'] = asset_turnover
         
-        # Note: Inventory turnover and receivables turnover require columns that don't exist
-        # in the current database schema, so we skip them for now
+        # Inventory Turnover (if inventory data exists)
+        inventory = fundamental_data.get('inventory')
+        cost_of_goods_sold = fundamental_data.get('cost_of_goods_sold')
+        if inventory and cost_of_goods_sold and inventory > 0:
+            inventory_turnover = self._safe_division(cost_of_goods_sold, inventory, 'Inventory turnover')
+            if inventory_turnover is not None:
+                ratios['inventory_turnover'] = inventory_turnover
+        
+        # Receivables Turnover (if accounts_receivable data exists)
+        accounts_receivable = fundamental_data.get('accounts_receivable')
+        if accounts_receivable and revenue and accounts_receivable > 0:
+            receivables_turnover = self._safe_division(revenue, accounts_receivable, 'Receivables turnover')
+            if receivables_turnover is not None:
+                ratios['receivables_turnover'] = receivables_turnover
         
         return ratios
     
