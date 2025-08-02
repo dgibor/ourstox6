@@ -126,15 +126,67 @@ def run_daily_trading_system(is_backup=False):
         logger.info("🚀 Starting daily trading process...")
         result = trading_system.run_daily_trading_process()
         
-        # Log results
+        # Log results with enhanced detail
         if result:
             logger.info("📈 DAILY TRADING PROCESS COMPLETED SUCCESSFULLY")
-            logger.info("📊 Results Summary:")
-            for key, value in result.items():
-                if isinstance(value, dict):
-                    logger.info(f"  {key}: {len(value)} items")
+            logger.info("📊 DETAILED RESULTS SUMMARY:")
+            
+            # Enhanced logging for each phase
+            for phase_name, phase_result in result.get('phase_results', {}).items():
+                if isinstance(phase_result, dict):
+                    logger.info(f"🔍 {phase_name.upper()}:")
+                    
+                    # Log specific metrics for each phase
+                    if 'total_tickers' in phase_result:
+                        logger.info(f"   • Total Tickers: {phase_result['total_tickers']}")
+                    if 'successful_updates' in phase_result:
+                        logger.info(f"   • Successful Updates: {phase_result['successful_updates']}")
+                    if 'failed_updates' in phase_result:
+                        logger.info(f"   • Failed Updates: {phase_result['failed_updates']}")
+                    if 'successful_calculations' in phase_result:
+                        logger.info(f"   • Successful Calculations: {phase_result['successful_calculations']}")
+                    if 'failed_calculations' in phase_result:
+                        logger.info(f"   • Failed Calculations: {phase_result['failed_calculations']}")
+                    if 'processing_time' in phase_result:
+                        logger.info(f"   • Processing Time: {phase_result['processing_time']:.2f}s")
+                    if 'api_calls_used' in phase_result:
+                        logger.info(f"   • API Calls Used: {phase_result['api_calls_used']}")
+                    
+                    # Log specific details for fundamental ratios
+                    if phase_name == 'priority_4_missing_fundamentals' and 'fundamentals' in phase_result:
+                        fundamentals = phase_result['fundamentals']
+                        logger.info(f"   📊 Fundamental Details:")
+                        logger.info(f"     - Candidates Found: {fundamentals.get('candidates', 0)}")
+                        logger.info(f"     - Successful Updates: {fundamentals.get('successful', 0)}")
+                        logger.info(f"     - Failed Updates: {fundamentals.get('failed', 0)}")
+                    
+                    # Log specific details for technical indicators
+                    if phase_name == 'priority_1_trading_day' and 'technical_indicators' in phase_result:
+                        technicals = phase_result['technical_indicators']
+                        logger.info(f"   📈 Technical Indicator Details:")
+                        logger.info(f"     - Successful Calculations: {technicals.get('successful_calculations', 0)}")
+                        logger.info(f"     - Failed Calculations: {technicals.get('failed_calculations', 0)}")
+                        logger.info(f"     - Historical Fetches: {technicals.get('historical_fetches', 0)}")
+                    
+                    # Log specific details for price updates
+                    if phase_name == 'priority_1_trading_day' and 'daily_prices' in phase_result:
+                        prices = phase_result['daily_prices']
+                        logger.info(f"   💰 Price Update Details:")
+                        logger.info(f"     - Total Tickers: {prices.get('total_tickers', 0)}")
+                        logger.info(f"     - Successful Updates: {prices.get('successful_updates', 0)}")
+                        logger.info(f"     - Failed Updates: {prices.get('failed_updates', 0)}")
+                        logger.info(f"     - Success Rate: {prices.get('success_rate', 0):.1f}%")
+                        logger.info(f"     - API Calls Used: {prices.get('api_calls_used', 0)}")
                 else:
-                    logger.info(f"  {key}: {value}")
+                    logger.info(f"   • {phase_name}: {phase_result}")
+            
+            # Log overall summary
+            total_time = result.get('total_processing_time', 0)
+            total_api_calls = result.get('total_api_calls_used', 0)
+            logger.info(f"🎯 OVERALL SUMMARY:")
+            logger.info(f"   • Total Processing Time: {total_time:.2f}s")
+            logger.info(f"   • Total API Calls Used: {total_api_calls}")
+            logger.info(f"   • Total Phases: {len(result.get('phase_results', {}))}")
         else:
             logger.warning("⚠️  Daily trading process returned no results")
         

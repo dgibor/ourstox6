@@ -362,8 +362,19 @@ class DailyFundamentalRatioCalculator:
                     'error': result.get('error', 'Unknown error')
                 })
         
-        # Log summary
-        logger.info(f"Ratio calculation summary: {results['successful']} successful, {results['failed']} failed")
+        # Log summary with enhanced details
+        logger.info(f"📊 FUNDAMENTAL RATIO CALCULATION SUMMARY:")
+        logger.info(f"   • Total Companies Processed: {results['total_processed']}")
+        logger.info(f"   • Successful Calculations: {results['successful']}")
+        logger.info(f"   • Failed Calculations: {results['failed']}")
+        logger.info(f"   • Success Rate: {(results['successful']/results['total_processed']*100):.1f}%" if results['total_processed'] > 0 else "N/A")
+        
+        if results['errors']:
+            logger.info(f"   ❌ Companies with Errors ({len(results['errors'])}):")
+            for error in results['errors'][:10]:  # Show first 10 errors
+                logger.info(f"     • {error['ticker']}: {error['error']}")
+            if len(results['errors']) > 10:
+                logger.info(f"     ... and {len(results['errors']) - 10} more errors")
         
         # Update monitoring
         self.monitoring.record_metric(

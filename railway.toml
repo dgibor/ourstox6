@@ -5,8 +5,8 @@ buildCommand = "pip install -r requirements.txt"
 [deploy]
 runtime = "V2"
 numReplicas = 1
-startCommand = "python railway_cron_entry.py"
-sleepApplication = true
+startCommand = "uvicorn dashboard_api:app --host 0.0.0.0 --port $PORT"
+sleepApplication = false
 restartPolicyType = "NEVER"
 
 # Environment variables for the cron job
@@ -18,9 +18,9 @@ TZ = "America/New_York"
 # Primary cron job - 10:05 PM UTC (5:05 PM ET after market close)
 [[cron]]
 schedule = "5 22 * * *"
-command = "python railway_cron_entry.py"
+command = "python run_daily_cron.py"
 
 # Backup cron job - 11:05 PM UTC (6:05 PM ET) in case primary fails
 [[cron]]
 schedule = "5 23 * * *"
-command = "python railway_cron_entry.py" 
+command = "python run_daily_cron.py --backup" 
