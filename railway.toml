@@ -5,7 +5,7 @@ buildCommand = "pip install -r requirements.txt"
 [deploy]
 runtime = "V2"
 numReplicas = 1
-startCommand = "python utility_functions/railway_cron_entry.py"
+startCommand = "python railway_cron_entry.py"
 sleepApplication = true
 restartPolicyType = "NEVER"
 cronSchedule = "5 22 * * *"
