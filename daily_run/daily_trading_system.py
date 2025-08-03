@@ -1651,25 +1651,65 @@ class DailyTradingSystem:
 
     def _update_single_ticker_fundamentals(self, ticker: str) -> bool:
         """
-        Update fundamental data for a single ticker using multi-service approach.
+        Update fundamental data for a single ticker using enhanced multi-service approach with fallback.
         """
+        manager = None
         try:
-            # Use the multi-service manager to get fundamental data
-            service = self.service_manager.get_service('fmp')  # Prefer FMP for fundamentals
-            fundamental_data = service.get_fundamental_data(ticker)
+            # Input validation
+            if not ticker or not isinstance(ticker, str):
+                logger.error(f"Invalid ticker provided: {ticker}")
+                return False
             
-            if fundamental_data:
+            ticker = ticker.strip().upper()
+            if not ticker.isalnum() or len(ticker) > 5:
+                logger.error(f"Invalid ticker format: {ticker}")
+                return False
+            
+            # Use the enhanced multi-service manager with fallback
+            from enhanced_multi_service_fundamental_manager import EnhancedMultiServiceFundamentalManager
+            
+            manager = EnhancedMultiServiceFundamentalManager()
+            
+            # Get fundamental data with fallback
+            result = manager.get_fundamental_data_with_fallback(ticker)
+            
+            if result and result.data:
                 # Store fundamental data in database
-                self._store_fundamental_data(ticker, fundamental_data)
-                logger.debug(f"Successfully updated fundamentals for {ticker}")
-                return True
+                success = manager.store_fundamental_data(result)
+                
+                if success:
+                    logger.info(f"✅ Successfully updated fundamentals for {ticker}")
+                    logger.info(f"   • Primary source: {result.primary_source}")
+                    logger.info(f"   • Fallback sources: {result.fallback_sources_used}")
+                    logger.info(f"   • Success rate: {result.success_rate:.1%}")
+                    logger.info(f"   • Fields collected: {len(result.data)}")
+                    
+                    # Log missing fields for monitoring
+                    if result.missing_fields:
+                        logger.warning(f"⚠️ {ticker} missing fields: {result.missing_fields}")
+                    
+                    return True
+                else:
+                    logger.error(f"❌ Failed to store fundamental data for {ticker}")
+                    return False
             else:
-                logger.warning(f"No fundamental data returned for {ticker}")
+                logger.warning(f"⚠️ No fundamental data returned for {ticker}")
                 return False
                 
-        except Exception as e:
-            logger.error(f"Error updating fundamentals for {ticker}: {e}")
+        except ImportError as e:
+            logger.error(f"❌ Failed to import EnhancedMultiServiceFundamentalManager: {e}")
             return False
+        except Exception as e:
+            logger.error(f"❌ Error updating fundamentals for {ticker}: {e}")
+            return False
+        finally:
+            # Ensure manager is always closed to prevent memory leaks
+            if manager is not None:
+                try:
+                    manager.close()
+                    logger.debug(f"Closed fundamental manager for {ticker}")
+                except Exception as e:
+                    logger.warning(f"Error closing fundamental manager for {ticker}: {e}")
 
     def _store_fundamental_data(self, ticker: str, fundamental_data: Dict):
         """

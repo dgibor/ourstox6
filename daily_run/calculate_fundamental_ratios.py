@@ -49,18 +49,22 @@ class DailyFundamentalRatioCalculator:
             SELECT DISTINCT 
                 s.ticker,
                 s.company_name,
-                (SELECT close FROM daily_charts WHERE ticker = s.ticker ORDER BY date DESC LIMIT 1) as current_price,
+                dc.close as current_price,
                 s.fundamentals_last_update,
                 s.next_earnings_date,
                 s.data_priority,
                 fr.calculation_date as last_ratio_calculation
             FROM stocks s
+            INNER JOIN (
+                SELECT ticker, close, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
+                FROM daily_charts
+            ) dc ON s.ticker = dc.ticker AND dc.rn = 1
             LEFT JOIN (
                 SELECT ticker, MAX(calculation_date) as calculation_date
                 FROM financial_ratios
                 GROUP BY ticker
             ) fr ON s.ticker = fr.ticker
-            WHERE (SELECT close FROM daily_charts WHERE ticker = s.ticker ORDER BY date DESC LIMIT 1) > 0
+            WHERE dc.close > 0
             AND s.fundamentals_last_update IS NOT NULL
             AND (
                 -- Companies with no ratio calculations
@@ -264,52 +268,55 @@ class DailyFundamentalRatioCalculator:
             True if successful, False otherwise
         """
         try:
-            # First, delete any existing ratios for today
-            delete_query = """
-            DELETE FROM financial_ratios 
-            WHERE ticker = %s AND calculation_date = CURRENT_DATE
-            """
-            
-            self.db.execute_update(delete_query, (ticker,))
-            
-            # Insert new ratios
-            insert_query = """
-            INSERT INTO financial_ratios (
-                ticker, calculation_date,
-                pe_ratio, pb_ratio, ps_ratio, ev_ebitda, peg_ratio,
-                roe, roa, roic, gross_margin, operating_margin, net_margin,
-                debt_to_equity, current_ratio, quick_ratio, interest_coverage, altman_z_score,
-                asset_turnover, inventory_turnover, receivables_turnover,
-                revenue_growth_yoy, earnings_growth_yoy, fcf_growth_yoy,
-                fcf_to_net_income, cash_conversion_cycle,
-                market_cap, enterprise_value, graham_number
-            ) VALUES (
-                %s, CURRENT_DATE,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s,
-                %s, %s, %s,
-                %s, %s,
-                %s, %s, %s
-            )
+            # Update ratios in company_fundamentals table
+            update_query = """
+            UPDATE company_fundamentals 
+            SET 
+                price_to_earnings = %s,
+                price_to_book = %s,
+                price_to_sales = %s,
+                ev_to_ebitda = %s,
+                peg_ratio = %s,
+                return_on_equity = %s,
+                return_on_assets = %s,
+                return_on_invested_capital = %s,
+                gross_margin = %s,
+                operating_margin = %s,
+                net_margin = %s,
+                debt_to_equity_ratio = %s,
+                current_ratio = %s,
+                quick_ratio = %s,
+                interest_coverage = %s,
+                altman_z_score = %s,
+                asset_turnover = %s,
+                inventory_turnover = %s,
+                receivables_turnover = %s,
+                revenue_growth_yoy = %s,
+                earnings_growth_yoy = %s,
+                fcf_growth_yoy = %s,
+                fcf_to_net_income = %s,
+                cash_conversion_cycle = %s,
+                graham_number = %s,
+                last_updated = CURRENT_DATE
+            WHERE ticker = %s AND period_type = 'ttm'
             """
             
             values = (
-                ticker,
-                ratios.get('pe_ratio'), ratios.get('pb_ratio'), ratios.get('ps_ratio'),
-                ratios.get('ev_ebitda'), ratios.get('peg_ratio'),
-                ratios.get('roe'), ratios.get('roa'), ratios.get('roic'),
+                ratios.get('price_to_earnings'), ratios.get('price_to_book'), ratios.get('price_to_sales'),
+                ratios.get('ev_to_ebitda'), ratios.get('peg_ratio'),
+                ratios.get('return_on_equity'), ratios.get('return_on_assets'), ratios.get('return_on_invested_capital'),
                 ratios.get('gross_margin'), ratios.get('operating_margin'), ratios.get('net_margin'),
-                ratios.get('debt_to_equity'), ratios.get('current_ratio'), ratios.get('quick_ratio'),
+                ratios.get('debt_to_equity_ratio'), ratios.get('current_ratio'), ratios.get('quick_ratio'),
                 ratios.get('interest_coverage'), ratios.get('altman_z_score'),
                 ratios.get('asset_turnover'), ratios.get('inventory_turnover'), ratios.get('receivables_turnover'),
                 ratios.get('revenue_growth_yoy'), ratios.get('earnings_growth_yoy'), ratios.get('fcf_growth_yoy'),
                 ratios.get('fcf_to_net_income'), ratios.get('cash_conversion_cycle'),
-                ratios.get('market_cap'), ratios.get('enterprise_value'), ratios.get('graham_number')
+                ratios.get('graham_number'),
+                ticker
             )
             
-            self.db.execute_update(insert_query, values)
+            self.db.execute_update(update_query, values)
+            logger.info(f"Successfully stored {len(ratios)} ratios for {ticker}")
             return True
             
         except Exception as e:

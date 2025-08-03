@@ -18,11 +18,20 @@ import time
 # Add current directory to path
 sys.path.append(os.path.dirname(__file__))
 
-from improved_ratio_calculator_v5_enhanced import EnhancedRatioCalculatorV5
-from data_validator import FundamentalDataValidator
-from database import DatabaseManager
-from error_handler import ErrorHandler, ErrorSeverity
-from monitoring import SystemMonitor
+# Import modules using absolute paths
+try:
+    from improved_ratio_calculator_v5_enhanced import EnhancedRatioCalculatorV5
+    from data_validator import FundamentalDataValidator
+    from database import DatabaseManager
+    from error_handler import ErrorHandler, ErrorSeverity
+    from monitoring import SystemMonitor
+except ImportError as e:
+    # Fallback to relative imports if absolute imports fail
+    from .improved_ratio_calculator_v5_enhanced import EnhancedRatioCalculatorV5
+    from .data_validator import FundamentalDataValidator
+    from .database import DatabaseManager
+    from .error_handler import ErrorHandler, ErrorSeverity
+    from .monitoring import SystemMonitor
 
 logger = logging.getLogger(__name__)
 

@@ -5,6 +5,12 @@ Enhanced Ratio Calculator V5 - With improved error handling and partial results
 import logging
 import math
 from typing import Dict, Optional, List, Tuple
+import sys
+import os
+
+# Add the daily_run directory to the path
+sys.path.append(os.path.dirname(__file__))
+
 from data_validator import FundamentalDataValidator
 
 logger = logging.getLogger(__name__)
@@ -47,11 +53,7 @@ class EnhancedRatioCalculatorV5:
                 # Check if we have minimum required data
                 if self._has_minimum_data(validated_fundamental, dependencies):
                     # Call method with correct parameters based on signature
-                    if category == 'profitability':
-                        ratios = method(ticker, validated_fundamental)
-                    elif category == 'quality':
-                        ratios = method(ticker, validated_fundamental)
-                    elif category in ['efficiency', 'growth']:
+                    if category in ['efficiency', 'growth']:
                         ratios = method(ticker, validated_fundamental, validated_historical)
                     else:
                         ratios = method(ticker, validated_fundamental, current_price)
@@ -138,8 +140,8 @@ class EnhancedRatioCalculatorV5:
         ebitda = fundamental_data.get('ebitda')
         if ebitda and ebitda > 0:
             market_cap = current_price * fundamental_data.get('shares_outstanding', 0)
-            total_debt = fundamental_data.get('total_debt', 0)
-            cash = fundamental_data.get('cash_and_equivalents', 0)
+            total_debt = fundamental_data.get('total_debt', 0) or 0  # Ensure it's not None
+            cash = fundamental_data.get('cash_and_equivalents', 0) or 0  # Ensure it's not None
             enterprise_value = market_cap + total_debt - cash
             
             if enterprise_value > 0:
@@ -156,55 +158,56 @@ class EnhancedRatioCalculatorV5:
         
         return ratios
     
-    def _calculate_profitability_ratios(self, ticker: str, fundamental_data: Dict) -> Dict[str, float]:
+    def _calculate_profitability_ratios(self, ticker: str, fundamental_data: Dict, current_price: float) -> Dict[str, float]:
         """Calculate profitability ratios with enhanced error handling"""
         ratios = {}
         
-        # Return on Equity (ROE)
+        # ROE
         net_income = fundamental_data.get('net_income')
         total_equity = fundamental_data.get('total_equity')
-        if net_income and total_equity and total_equity > 0:
+        if net_income is not None and total_equity and total_equity > 0:
             roe = self._safe_division(net_income, total_equity, 'ROE')
             if roe is not None:
-                ratios['return_on_equity'] = roe
+                ratios['roe'] = roe * 100  # Convert to percentage
         
-        # Return on Assets (ROA)
+        # ROA
         total_assets = fundamental_data.get('total_assets')
-        if net_income and total_assets and total_assets > 0:
+        if net_income is not None and total_assets and total_assets > 0:
             roa = self._safe_division(net_income, total_assets, 'ROA')
             if roa is not None:
-                ratios['return_on_assets'] = roa
+                ratios['roa'] = roa * 100  # Convert to percentage
         
-        # Return on Invested Capital (ROIC)
-        operating_income = fundamental_data.get('operating_income')
-        total_debt = fundamental_data.get('total_debt', 0)
-        total_equity = fundamental_data.get('total_equity')
-        if operating_income and total_assets and total_debt and total_equity:
-            invested_capital = total_assets - total_debt + total_equity
+        # ROIC
+        total_debt = fundamental_data.get('total_debt', 0) or 0  # Ensure it's not None
+        if net_income is not None and total_equity and total_equity > 0:
+            invested_capital = total_equity + total_debt
             if invested_capital > 0:
-                roic = self._safe_division(operating_income, invested_capital, 'ROIC')
+                roic = self._safe_division(net_income, invested_capital, 'ROIC')
                 if roic is not None:
-                    ratios['return_on_invested_capital'] = roic
+                    ratios['roic'] = roic * 100  # Convert to percentage
         
-        # Gross Margin
+        # Margins
         revenue = fundamental_data.get('revenue')
-        cost_of_goods_sold = fundamental_data.get('cost_of_goods_sold')
-        if revenue and cost_of_goods_sold and revenue > 0:
-            gross_margin = self._safe_division(revenue - cost_of_goods_sold, revenue, 'Gross margin')
-            if gross_margin is not None:
-                ratios['gross_margin'] = gross_margin
-        
-        # Operating Margin
-        if operating_income and revenue and revenue > 0:
-            operating_margin = self._safe_division(operating_income, revenue, 'Operating margin')
-            if operating_margin is not None:
-                ratios['operating_margin'] = operating_margin
-        
-        # Net Margin
-        if net_income and revenue and revenue > 0:
-            net_margin = self._safe_division(net_income, revenue, 'Net margin')
-            if net_margin is not None:
-                ratios['net_margin'] = net_margin
+        if revenue and revenue > 0:
+            # Gross Margin
+            gross_profit = fundamental_data.get('gross_profit')
+            if gross_profit is not None:
+                gross_margin = self._safe_division(gross_profit, revenue, 'Gross margin')
+                if gross_margin is not None:
+                    ratios['gross_margin'] = gross_margin * 100
+            
+            # Operating Margin
+            operating_income = fundamental_data.get('operating_income')
+            if operating_income is not None:
+                operating_margin = self._safe_division(operating_income, revenue, 'Operating margin')
+                if operating_margin is not None:
+                    ratios['operating_margin'] = operating_margin * 100
+            
+            # Net Margin
+            if net_income is not None:
+                net_margin = self._safe_division(net_income, revenue, 'Net margin')
+                if net_margin is not None:
+                    ratios['net_margin'] = net_margin * 100
         
         return ratios
     
@@ -213,7 +216,7 @@ class EnhancedRatioCalculatorV5:
         ratios = {}
         
         # Debt-to-Equity
-        total_debt = fundamental_data.get('total_debt', 0)
+        total_debt = fundamental_data.get('total_debt', 0) or 0  # Ensure it's not None
         total_equity = fundamental_data.get('total_equity')
         if total_equity and total_equity > 0:
             debt_equity = self._safe_division(total_debt, total_equity, 'Debt-to-equity')
@@ -229,7 +232,7 @@ class EnhancedRatioCalculatorV5:
                 ratios['current_ratio'] = current_ratio
         
         # Quick Ratio (Acid Test)
-        inventory = fundamental_data.get('inventory', 0)
+        inventory = fundamental_data.get('inventory', 0) or 0  # Ensure it's not None
         if current_assets and current_liabilities and current_liabilities > 0:
             quick_assets = current_assets - inventory
             quick_ratio = self._safe_division(quick_assets, current_liabilities, 'Quick ratio')
@@ -300,7 +303,7 @@ class EnhancedRatioCalculatorV5:
         
         return ratios
     
-    def _calculate_quality_metrics(self, ticker: str, fundamental_data: Dict) -> Dict[str, float]:
+    def _calculate_quality_metrics(self, ticker: str, fundamental_data: Dict, current_price: float) -> Dict[str, float]:
         """Calculate quality metrics with enhanced error handling"""
         ratios = {}
         
@@ -330,8 +333,8 @@ class EnhancedRatioCalculatorV5:
         
         # Enterprise Value
         if 'market_cap' in ratios:
-            total_debt = fundamental_data.get('total_debt', 0)
-            cash = fundamental_data.get('cash_and_equivalents', 0)
+            total_debt = fundamental_data.get('total_debt', 0) or 0  # Ensure it's not None
+            cash = fundamental_data.get('cash_and_equivalents', 0) or 0  # Ensure it's not None
             enterprise_value = ratios['market_cap'] + total_debt - cash
             ratios['enterprise_value'] = enterprise_value
         

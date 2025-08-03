@@ -14,8 +14,8 @@ import pandas as pd
 from dotenv import load_dotenv
 import os
 
-from database import DatabaseManager
-from error_handler import ErrorHandler
+from .database import DatabaseManager
+from .error_handler import ErrorHandler
 
 # Load environment variables
 load_dotenv()
