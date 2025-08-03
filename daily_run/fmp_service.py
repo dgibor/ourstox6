@@ -212,6 +212,9 @@ class FMPService:
                 annual_operating_income = float(latest_annual.get('operatingIncome', 0))
                 annual_ebitda = float(latest_annual.get('ebitda', 0))
                 
+                # Calculate cost of goods sold from revenue and gross profit
+                cost_of_goods_sold = annual_revenue - annual_gross_profit if annual_gross_profit > 0 else 0
+                
                 # Fix fiscal year parsing - handle 'FY' and other non-numeric values
                 fiscal_year = datetime.now().year
                 try:
@@ -233,6 +236,7 @@ class FMPService:
                     'revenue': annual_revenue,
                     'revenue_annual': annual_revenue,
                     'gross_profit': annual_gross_profit,
+                    'cost_of_goods_sold': cost_of_goods_sold,  # Calculate COGS
                     'operating_income': annual_operating_income,
                     'net_income': annual_net_income,
                     'ebitda': annual_ebitda,
@@ -428,14 +432,18 @@ class FMPService:
             
             # Also update company_fundamentals table with UPSERT
             if income or balance or cash_flow:
+                # Get shares outstanding from key_stats
+                shares_outstanding = market_data.get('shares_outstanding', 0)
+                
                 # Use ON CONFLICT for upsert
                 insert_query = """
                 INSERT INTO company_fundamentals (
                     ticker, report_date, period_type, fiscal_year, fiscal_quarter,
                     revenue, net_income, ebitda, total_assets, total_debt, 
                     total_equity, cash_and_equivalents, operating_income, free_cash_flow,
+                    cost_of_goods_sold, current_assets, current_liabilities, shares_outstanding,
                     data_source, last_updated
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (ticker) DO UPDATE SET
                     report_date = EXCLUDED.report_date,
                     period_type = EXCLUDED.period_type,
@@ -450,6 +458,10 @@ class FMPService:
                     cash_and_equivalents = EXCLUDED.cash_and_equivalents,
                     operating_income = EXCLUDED.operating_income,
                     free_cash_flow = EXCLUDED.free_cash_flow,
+                    cost_of_goods_sold = EXCLUDED.cost_of_goods_sold,
+                    current_assets = EXCLUDED.current_assets,
+                    current_liabilities = EXCLUDED.current_liabilities,
+                    shares_outstanding = EXCLUDED.shares_outstanding,
                     data_source = EXCLUDED.data_source,
                     last_updated = EXCLUDED.last_updated
                 """
@@ -471,43 +483,16 @@ class FMPService:
                     balance.get('cash_and_equivalents'),
                     income.get('operating_income'),
                     cash_flow.get('free_cash_flow'),
+                    income.get('cost_of_goods_sold'),  # Add COGS
+                    balance.get('current_assets'),     # Add current assets
+                    balance.get('current_liabilities'), # Add current liabilities
+                    shares_outstanding,                # Add shares outstanding
                     'fmp',
                     datetime.now()
                 ))
 
-            # Calculate ratios from raw data
-            raw_data = {
-                'revenue': income.get('revenue'),
-                'gross_profit': income.get('gross_profit'),
-                'operating_income': income.get('operating_income'),
-                'net_income': income.get('net_income'),
-                'ebitda': income.get('ebitda'),
-                'total_assets': balance.get('total_assets'),
-                'total_debt': balance.get('total_debt'),
-                'total_equity': balance.get('total_equity'),
-                'current_assets': balance.get('current_assets'),
-                'current_liabilities': balance.get('current_liabilities'),
-                'free_cash_flow': cash_flow.get('free_cash_flow')
-            }
-            
-            # Get current price from daily_charts table
-            current_price = self.db.get_latest_price(ticker)
-            if current_price:
-                market_data['current_price'] = current_price
-                logging.info(f"{ticker} Current price from daily_charts: ${current_price:.2f}")
-            else:
-                logging.warning(f"{ticker} No current price found in daily_charts table")
-            
-            # Calculate ratios from raw data
-            calculated_ratios = calculate_ratios(raw_data, market_data)
-            
-            # Validate against FMP ratios if available
-            validation_diffs = validate_ratios(calculated_ratios, fmp_ratios)
-            if validation_diffs:
-                logging.info(f"{ticker} Ratio validation differences:")
-                for ratio, diff in validation_diffs.items():
-                    if diff['pct_diff'] and diff['pct_diff'] > 0.05:  # Log if >5% difference
-                        logging.warning(f"  {ratio}: Calc={diff['calc']:.4f}, FMP={diff['fmp']:.4f}, Diff={diff['pct_diff']:.1%}")
+            # Note: Ratio calculation is handled by the separate calculate_fundamental_ratios.py script
+            # This service focuses on populating raw fundamental data
             
             self.conn.commit()
             logging.info(f"Successfully stored FMP fundamental data for {ticker}")

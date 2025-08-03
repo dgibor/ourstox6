@@ -11,7 +11,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, date, timedelta
 import psycopg2
-from psycopg2.extras import RealDictCursor
+
 
 # Add current directory to path
 sys.path.append(os.path.dirname(__file__))
@@ -49,18 +49,22 @@ class DailyFundamentalRatioCalculator:
             SELECT DISTINCT 
                 s.ticker,
                 s.company_name,
-                s.current_price,
+                dc.close as current_price,
                 s.fundamentals_last_update,
                 s.next_earnings_date,
                 s.data_priority,
                 fr.calculation_date as last_ratio_calculation
             FROM stocks s
+            INNER JOIN (
+                SELECT ticker, close, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) as rn
+                FROM daily_charts
+            ) dc ON s.ticker = dc.ticker AND dc.rn = 1
             LEFT JOIN (
                 SELECT ticker, MAX(calculation_date) as calculation_date
                 FROM financial_ratios
                 GROUP BY ticker
             ) fr ON s.ticker = fr.ticker
-            WHERE s.current_price > 0
+            WHERE dc.close > 0
             AND s.fundamentals_last_update IS NOT NULL
             AND (
                 -- Companies with no ratio calculations
@@ -79,9 +83,7 @@ class DailyFundamentalRatioCalculator:
             LIMIT 100
             """
             
-            with self.db.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query)
-                companies = cursor.fetchall()
+            companies = self.db.fetch_all_dict(query)
                 
             logger.info(f"Found {len(companies)} companies needing ratio updates")
             return companies
@@ -107,20 +109,19 @@ class DailyFundamentalRatioCalculator:
             query = """
             SELECT 
                 cf.*,
-                s.current_price,
-                s.shares_outstanding
+                s.shares_outstanding,
+                (SELECT close FROM daily_charts WHERE ticker = cf.ticker ORDER BY date DESC LIMIT 1) as current_price
             FROM company_fundamentals cf
             JOIN stocks s ON cf.ticker = s.ticker
-            WHERE cf.ticker = %s
-            AND cf.period_type = 'annual'
+                    WHERE cf.ticker = %s
+        AND cf.period_type = 'ttm'
             ORDER BY cf.report_date DESC
             LIMIT 1
             """
             
-            with self.db.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, (ticker,))
-                result = cursor.fetchone()
-                
+            results = self.db.fetch_all_dict(query, (ticker,))
+            result = results[0] if results else None
+            
             if result:
                 # Convert to regular dict and handle numeric types
                 fundamental_data = dict(result)
@@ -151,32 +152,35 @@ class DailyFundamentalRatioCalculator:
             SELECT 
                 revenue as revenue_previous,
                 total_assets as total_assets_previous,
-                inventory as inventory_previous,
-                accounts_receivable as accounts_receivable_previous,
-                retained_earnings as retained_earnings_previous
+                net_income as net_income_previous,
+                free_cash_flow as free_cash_flow_previous,
+                cost_of_goods_sold as cost_of_goods_sold_previous,
+                current_assets as current_assets_previous,
+                current_liabilities as current_liabilities_previous
             FROM company_fundamentals
             WHERE ticker = %s
-            AND period_type = 'annual'
+            AND period_type = 'ttm'
             ORDER BY report_date DESC
             LIMIT 1 OFFSET 1
             """
             
-            with self.db.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, (ticker,))
-                result = cursor.fetchone()
-                
+            result = self.db.fetch_one(query, (ticker,))
+            
             if result:
-                historical_data = dict(result)
-                for key, value in historical_data.items():
-                    if isinstance(value, (int, float)) and value is not None:
-                        historical_data[key] = float(value)
-                return historical_data
-            else:
-                logger.warning(f"No historical fundamental data found for {ticker}")
-                return None
-                
+                return {
+                    'revenue_previous': result[0],
+                    'total_assets_previous': result[1],
+                    'net_income_previous': result[2],
+                    'free_cash_flow_previous': result[3],
+                    'cost_of_goods_sold_previous': result[4],
+                    'current_assets_previous': result[5],
+                    'current_liabilities_previous': result[6]
+                }
+            
+            return None
+            
         except Exception as e:
-            logger.error(f"Error getting historical data for {ticker}: {e}")
+            self.error_handler.handle_exception(e, {'ticker': ticker, 'operation': 'get_historical_fundamental_data'})
             return None
     
     def calculate_ratios_for_company(self, company_data: Dict) -> Dict:
@@ -264,61 +268,59 @@ class DailyFundamentalRatioCalculator:
             True if successful, False otherwise
         """
         try:
-            # First, delete any existing ratios for today
-            delete_query = """
-            DELETE FROM financial_ratios 
-            WHERE ticker = %s AND calculation_date = CURRENT_DATE
-            """
-            
-            with self.db.cursor() as cursor:
-                cursor.execute(delete_query, (ticker,))
-            
-            # Insert new ratios
-            insert_query = """
-            INSERT INTO financial_ratios (
-                ticker, calculation_date,
-                pe_ratio, pb_ratio, ps_ratio, ev_ebitda, peg_ratio,
-                roe, roa, roic, gross_margin, operating_margin, net_margin,
-                debt_to_equity, current_ratio, quick_ratio, interest_coverage, altman_z_score,
-                asset_turnover, inventory_turnover, receivables_turnover,
-                revenue_growth_yoy, earnings_growth_yoy, fcf_growth_yoy,
-                fcf_to_net_income, cash_conversion_cycle,
-                market_cap, enterprise_value, graham_number
-            ) VALUES (
-                %s, CURRENT_DATE,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s,
-                %s, %s, %s,
-                %s, %s, %s,
-                %s, %s,
-                %s, %s, %s
-            )
+            # Update ratios in company_fundamentals table
+            update_query = """
+            UPDATE company_fundamentals 
+            SET 
+                price_to_earnings = %s,
+                price_to_book = %s,
+                price_to_sales = %s,
+                ev_to_ebitda = %s,
+                peg_ratio = %s,
+                return_on_equity = %s,
+                return_on_assets = %s,
+                return_on_invested_capital = %s,
+                gross_margin = %s,
+                operating_margin = %s,
+                net_margin = %s,
+                debt_to_equity_ratio = %s,
+                current_ratio = %s,
+                quick_ratio = %s,
+                interest_coverage = %s,
+                altman_z_score = %s,
+                asset_turnover = %s,
+                inventory_turnover = %s,
+                receivables_turnover = %s,
+                revenue_growth_yoy = %s,
+                earnings_growth_yoy = %s,
+                fcf_growth_yoy = %s,
+                fcf_to_net_income = %s,
+                cash_conversion_cycle = %s,
+                graham_number = %s,
+                last_updated = CURRENT_DATE
+            WHERE ticker = %s AND period_type = 'ttm'
             """
             
             values = (
-                ticker,
-                ratios.get('pe_ratio'), ratios.get('pb_ratio'), ratios.get('ps_ratio'),
-                ratios.get('ev_ebitda'), ratios.get('peg_ratio'),
-                ratios.get('roe'), ratios.get('roa'), ratios.get('roic'),
+                ratios.get('price_to_earnings'), ratios.get('price_to_book'), ratios.get('price_to_sales'),
+                ratios.get('ev_to_ebitda'), ratios.get('peg_ratio'),
+                ratios.get('return_on_equity'), ratios.get('return_on_assets'), ratios.get('return_on_invested_capital'),
                 ratios.get('gross_margin'), ratios.get('operating_margin'), ratios.get('net_margin'),
-                ratios.get('debt_to_equity'), ratios.get('current_ratio'), ratios.get('quick_ratio'),
+                ratios.get('debt_to_equity_ratio'), ratios.get('current_ratio'), ratios.get('quick_ratio'),
                 ratios.get('interest_coverage'), ratios.get('altman_z_score'),
                 ratios.get('asset_turnover'), ratios.get('inventory_turnover'), ratios.get('receivables_turnover'),
                 ratios.get('revenue_growth_yoy'), ratios.get('earnings_growth_yoy'), ratios.get('fcf_growth_yoy'),
                 ratios.get('fcf_to_net_income'), ratios.get('cash_conversion_cycle'),
-                ratios.get('market_cap'), ratios.get('enterprise_value'), ratios.get('graham_number')
+                ratios.get('graham_number'),
+                ticker
             )
             
-            with self.db.cursor() as cursor:
-                cursor.execute(insert_query, values)
-            
-            self.db.commit()
+            self.db.execute_update(update_query, values)
+            logger.info(f"Successfully stored {len(ratios)} ratios for {ticker}")
             return True
             
         except Exception as e:
             logger.error(f"Error storing ratios for {ticker}: {e}")
-            self.db.rollback()
             return False
     
     def process_all_companies(self) -> Dict:
@@ -387,8 +389,7 @@ class DailyFundamentalRatioCalculator:
         # Update monitoring
         self.monitoring.record_metric(
             'fundamental_ratios_calculated',
-            results['successful'],
-            {'total_processed': results['total_processed']}
+            results['successful']
         )
         
         return results

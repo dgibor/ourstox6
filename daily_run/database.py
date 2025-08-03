@@ -8,8 +8,8 @@ import psycopg2.extras
 import logging
 from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
-from config import Config
-from exceptions import DatabaseError
+from .config import Config
+from .exceptions import DatabaseError
 from datetime import date
 
 class DatabaseManager:
@@ -497,11 +497,37 @@ class DatabaseManager:
         try:
             with self.get_cursor() as cursor:
                 cursor.execute("SELECT 1")
-                result = cursor.fetchone()
-                return result[0] == 1
+                return True
         except Exception as e:
             self.logger.error(f"Database connection test failed: {e}")
             return False
+    
+    def begin_transaction(self):
+        """Begin a database transaction"""
+        if not self.connection:
+            self.connect()
+        self.connection.autocommit = False
+        self.logger.debug("Transaction begun")
+    
+    def commit(self):
+        """Commit the current transaction"""
+        if self.connection:
+            self.connection.commit()
+            self.logger.debug("Transaction committed")
+    
+    def rollback(self):
+        """Rollback the current transaction"""
+        if self.connection:
+            self.connection.rollback()
+            self.logger.debug("Transaction rolled back")
+    
+    def cursor(self, cursor_factory=None):
+        """Get a database cursor with optional factory"""
+        if not self.connection:
+            self.connect()
+        if cursor_factory:
+            return self.connection.cursor(cursor_factory=cursor_factory)
+        return self.connection.cursor()
 
 def test_database():
     """Test database manager functionality"""

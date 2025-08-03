@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, date
 import pandas as pd
 import numpy as np
-from daily_run.error_handler import ErrorHandler, ErrorSeverity
+from error_handler import ErrorHandler, ErrorSeverity
 
 logger = logging.getLogger(__name__)
 
