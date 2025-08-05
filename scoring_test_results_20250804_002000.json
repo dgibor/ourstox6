@@ -1,0 +1,111 @@
+{
+  "timestamp": "20250804_002000",
+  "summary": {
+    "total_tickers": 10,
+    "successful": 0,
+    "failed": 10,
+    "success_rate": 0.0,
+    "total_time": 423.16,
+    "average_time_per_ticker": 42.316
+  },
+  "professor_analysis": {
+    "score_distribution": {},
+    "anomalies": [],
+    "insights": [
+      "No successful calculations to analyze"
+    ],
+    "recommendations": []
+  },
+  "ticker_results": {
+    "AAPL": {
+      "success": false,
+      "calculation_time": 43.223,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    },
+    "MSFT": {
+      "success": false,
+      "calculation_time": 42.062,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    },
+    "GOOGL": {
+      "success": false,
+      "calculation_time": 42.074,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    },
+    "AMZN": {
+      "success": false,
+      "calculation_time": 42.08,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    },
+    "TSLA": {
+      "success": false,
+      "calculation_time": 42.096,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    },
+    "NVDA": {
+      "success": false,
+      "calculation_time": 42.118,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    },
+    "META": {
+      "success": false,
+      "calculation_time": 42.108,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    },
+    "NFLX": {
+      "success": false,
+      "calculation_time": 43.259,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    },
+    "AMD": {
+      "success": false,
+      "calculation_time": 42.074,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    },
+    "INTC": {
+      "success": false,
+      "calculation_time": 42.067,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Missing fundamental or technical scores"
+      ]
+    }
+  }
+}

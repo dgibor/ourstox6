@@ -1,0 +1,330 @@
+{
+  "timestamp": "20250804_064608",
+  "summary": {
+    "total_tickers": 20,
+    "successful": 19,
+    "failed": 1,
+    "success_rate": 95.0,
+    "total_time": 32.46,
+    "average_time_per_ticker": 1.623
+  },
+  "professor_analysis": {
+    "score_distribution": {
+      "fundamental_health": {
+        "mean": 51.64,
+        "min": 44.75,
+        "max": 68.0,
+        "range": 23.25
+      },
+      "technical_health": {
+        "mean": 58.53,
+        "min": 44.73,
+        "max": 64.5,
+        "range": 19.77
+      },
+      "value_investment": {
+        "mean": 36.84,
+        "min": 29.5,
+        "max": 37.5,
+        "range": 8.0
+      },
+      "trading_signals": {
+        "mean": 62.15,
+        "min": 50.3,
+        "max": 69.65,
+        "range": 19.35
+      },
+      "risk_assessment": {
+        "mean": 57.12,
+        "min": 49.53,
+        "max": 62.03,
+        "range": 12.5
+      }
+    },
+    "anomalies": [],
+    "insights": [
+      "Fundamental and technical scores are reasonably balanced (fund: 51.64, tech: 58.53)",
+      "Technical scores show low differentiation (range: 19.77) - may need recalibration"
+    ],
+    "recommendations": [
+      "Consider adjusting scoring thresholds to increase score differentiation"
+    ]
+  },
+  "ticker_results": {
+    "AAPL": {
+      "success": true,
+      "calculation_time": 2.773,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 68.0,
+        "technical_health": 64.5,
+        "overall_score": 66.25,
+        "value_score": 37.5,
+        "trading_signal": 62.0,
+        "fundamental_risk": 40.0,
+        "technical_risk": 74.06
+      }
+    },
+    "MSFT": {
+      "success": true,
+      "calculation_time": 1.651,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 50.0,
+        "technical_health": 61.35,
+        "overall_score": 55.675,
+        "value_score": 33.0,
+        "trading_signal": 68.3,
+        "fundamental_risk": 50.0,
+        "technical_risk": 69.06
+      }
+    },
+    "GOOGL": {
+      "success": true,
+      "calculation_time": 1.65,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 45.55,
+        "technical_health": 51.62,
+        "overall_score": 48.584999999999994,
+        "value_score": 37.5,
+        "trading_signal": 59.0,
+        "fundamental_risk": 50.0,
+        "technical_risk": 64.06
+      }
+    },
+    "AMZN": {
+      "success": true,
+      "calculation_time": 1.658,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 44.75,
+        "technical_health": 61.12,
+        "overall_score": 52.935,
+        "value_score": 37.5,
+        "trading_signal": 53.0,
+        "fundamental_risk": 50.0,
+        "technical_risk": 64.06
+      }
+    },
+    "TSLA": {
+      "success": true,
+      "calculation_time": 1.622,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 44.75,
+        "technical_health": 59.73,
+        "overall_score": 52.239999999999995,
+        "value_score": 37.5,
+        "trading_signal": 56.0,
+        "fundamental_risk": 50.0,
+        "technical_risk": 74.06
+      }
+    },
+    "NVDA": {
+      "success": true,
+      "calculation_time": 1.591,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 46.35,
+        "technical_health": 57.12,
+        "overall_score": 51.735,
+        "value_score": 37.5,
+        "trading_signal": 59.0,
+        "fundamental_risk": 50.0,
+        "technical_risk": 64.06
+      }
+    },
+    "META": {
+      "success": true,
+      "calculation_time": 1.546,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 46.35,
+        "technical_health": 56.73,
+        "overall_score": 51.54,
+        "value_score": 37.5,
+        "trading_signal": 63.5,
+        "fundamental_risk": 50.0,
+        "technical_risk": 64.06
+      }
+    },
+    "BRK-B": {
+      "success": false,
+      "calculation_time": 0.529,
+      "errors": [
+        "Failed to calculate fundamental scores",
+        "Failed to calculate technical scores",
+        "Failed to calculate scores"
+      ]
+    },
+    "UNH": {
+      "success": true,
+      "calculation_time": 1.657,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 47.95,
+        "technical_health": 61.85,
+        "overall_score": 54.900000000000006,
+        "value_score": 37.5,
+        "trading_signal": 50.3,
+        "fundamental_risk": 50.0,
+        "technical_risk": 52.5
+      }
+    },
+    "JNJ": {
+      "success": true,
+      "calculation_time": 1.668,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 47.95,
+        "technical_health": 62.75,
+        "overall_score": 55.35,
+        "value_score": 37.5,
+        "trading_signal": 66.5,
+        "fundamental_risk": 50.0,
+        "technical_risk": 64.06
+      }
+    },
+    "JPM": {
+      "success": true,
+      "calculation_time": 1.613,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 44.75,
+        "technical_health": 58.35,
+        "overall_score": 51.55,
+        "value_score": 37.5,
+        "trading_signal": 68.15,
+        "fundamental_risk": 50.0,
+        "technical_risk": 74.06
+      }
+    },
+    "PG": {
+      "success": true,
+      "calculation_time": 1.578,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 65.6,
+        "technical_health": 58.25,
+        "overall_score": 61.925,
+        "value_score": 29.5,
+        "trading_signal": 61.85,
+        "fundamental_risk": 40.0,
+        "technical_risk": 59.06
+      }
+    },
+    "HD": {
+      "success": true,
+      "calculation_time": 1.583,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 47.15,
+        "technical_health": 60.98,
+        "overall_score": 54.065,
+        "value_score": 37.5,
+        "trading_signal": 69.65,
+        "fundamental_risk": 50.0,
+        "technical_risk": 74.06
+      }
+    },
+    "MA": {
+      "success": true,
+      "calculation_time": 1.686,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 47.15,
+        "technical_health": 60.98,
+        "overall_score": 54.065,
+        "value_score": 37.5,
+        "trading_signal": 69.65,
+        "fundamental_risk": 50.0,
+        "technical_risk": 69.06
+      }
+    },
+    "PFE": {
+      "success": true,
+      "calculation_time": 1.572,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 52.0,
+        "technical_health": 63.43,
+        "overall_score": 57.715,
+        "value_score": 37.5,
+        "trading_signal": 60.5,
+        "fundamental_risk": 50.0,
+        "technical_risk": 69.06
+      }
+    },
+    "ABBV": {
+      "success": true,
+      "calculation_time": 1.579,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 58.3,
+        "technical_health": 53.25,
+        "overall_score": 55.775,
+        "value_score": 37.5,
+        "trading_signal": 64.4,
+        "fundamental_risk": 40.0,
+        "technical_risk": 69.06
+      }
+    },
+    "KO": {
+      "success": true,
+      "calculation_time": 1.627,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 62.0,
+        "technical_health": 63.15,
+        "overall_score": 62.575,
+        "value_score": 37.5,
+        "trading_signal": 60.5,
+        "fundamental_risk": 40.0,
+        "technical_risk": 69.06
+      }
+    },
+    "PEP": {
+      "success": true,
+      "calculation_time": 1.614,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 49.6,
+        "technical_health": 60.88,
+        "overall_score": 55.24,
+        "value_score": 37.5,
+        "trading_signal": 63.05,
+        "fundamental_risk": 50.0,
+        "technical_risk": 69.06
+      }
+    },
+    "AVGO": {
+      "success": true,
+      "calculation_time": 1.626,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 54.1,
+        "technical_health": 44.73,
+        "overall_score": 49.415,
+        "value_score": 37.5,
+        "trading_signal": 59.0,
+        "fundamental_risk": 50.0,
+        "technical_risk": 64.06
+      }
+    },
+    "COST": {
+      "success": true,
+      "calculation_time": 1.638,
+      "errors": [],
+      "combined_scores": {
+        "fundamental_health": 58.8,
+        "technical_health": 51.23,
+        "overall_score": 55.015,
+        "value_score": 37.5,
+        "trading_signal": 66.5,
+        "fundamental_risk": 40.0,
+        "technical_risk": 64.06
+      }
+    }
+  }
+}

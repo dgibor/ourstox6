@@ -1,0 +1,91 @@
+{
+  "timestamp": "20250804_003817",
+  "summary": {
+    "total_tickers": 10,
+    "successful": 0,
+    "failed": 10,
+    "success_rate": 0.0,
+    "total_time": 8.97,
+    "average_time_per_ticker": 0.897
+  },
+  "professor_analysis": {
+    "score_distribution": {},
+    "anomalies": [],
+    "insights": [
+      "No successful calculations to analyze"
+    ],
+    "recommendations": []
+  },
+  "ticker_results": {
+    "AAPL": {
+      "success": false,
+      "calculation_time": 2.036,
+      "errors": [
+        "Failed to store scores in database"
+      ]
+    },
+    "MSFT": {
+      "success": false,
+      "calculation_time": 1.031,
+      "errors": [
+        "Failed to store scores in database"
+      ]
+    },
+    "GOOGL": {
+      "success": false,
+      "calculation_time": 0.753,
+      "errors": [
+        "Failed to store scores in database"
+      ]
+    },
+    "AMZN": {
+      "success": false,
+      "calculation_time": 0.736,
+      "errors": [
+        "Exception: '<' not supported between instances of 'NoneType' and 'int'"
+      ]
+    },
+    "TSLA": {
+      "success": false,
+      "calculation_time": 0.749,
+      "errors": [
+        "Exception: '<' not supported between instances of 'NoneType' and 'int'"
+      ]
+    },
+    "NVDA": {
+      "success": false,
+      "calculation_time": 0.74,
+      "errors": [
+        "Failed to store scores in database"
+      ]
+    },
+    "META": {
+      "success": false,
+      "calculation_time": 0.732,
+      "errors": [
+        "Failed to store scores in database"
+      ]
+    },
+    "NFLX": {
+      "success": false,
+      "calculation_time": 0.723,
+      "errors": [
+        "Exception: '<' not supported between instances of 'NoneType' and 'int'"
+      ]
+    },
+    "AMD": {
+      "success": false,
+      "calculation_time": 0.731,
+      "errors": [
+        "Failed to store scores in database"
+      ]
+    },
+    "INTC": {
+      "success": false,
+      "calculation_time": 0.742,
+      "errors": [
+        "Exception: '<' not supported between instances of 'NoneType' and 'int'"
+      ]
+    }
+  }
+}

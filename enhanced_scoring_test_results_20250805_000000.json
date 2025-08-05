@@ -1,0 +1,155 @@
+[
+  {
+    "ticker": "PG",
+    "fundamental": {
+      "fundamental_health_score": 44.89,
+      "fundamental_health_grade": "Sell",
+      "fundamental_health_description": "Poor fundamental health",
+      "value_investment_score": 52.48,
+      "value_rating": "Neutral",
+      "value_investment_description": "Fair value",
+      "fundamental_risk_score": 71.49,
+      "fundamental_risk_level": "High",
+      "fundamental_risk_description": "High fundamental risk",
+      "overall_score": 44.65,
+      "overall_grade": "Neutral",
+      "overall_description": "Neutral recommendation",
+      "ticker": "PG",
+      "data_confidence": 0.7627272727272729,
+      "missing_metrics": [],
+      "estimated_ratios": [
+        "pe_ratio",
+        "pb_ratio",
+        "roe",
+        "roa",
+        "debt_to_equity",
+        "current_ratio",
+        "ev_ebitda",
+        "gross_margin",
+        "operating_margin",
+        "net_margin",
+        "revenue_growth_yoy",
+        "earnings_growth_yoy"
+      ],
+      "data_warnings": [
+        "PE estimated using sector-based calculation",
+        "PB ratio using sector-based estimation",
+        "ROE using sector-based estimation"
+      ],
+      "sector": "Consumer Staples",
+      "market_cap": "375970000000.00"
+    },
+    "technical": {
+      "ticker": "PG",
+      "technical_health_score": 58.25,
+      "technical_health_normalized": 3,
+      "technical_health_grade": "Neutral",
+      "technical_health_description": "Average technical health",
+      "technical_health_components": {
+        "trend_strength": 56.5,
+        "momentum": 36.0,
+        "support_resistance": {
+          "price_vs_support_resistance": 60,
+          "support_strength": 100,
+          "resistance_distance": 100
+        },
+        "volume_confirmation": 56.5,
+        "components": {
+          "trend": {
+            "ema_alignment": 50,
+            "price_vs_emas": 50,
+            "adx": 100,
+            "macd": 20
+          },
+          "momentum": {
+            "rsi_momentum": 25,
+            "stochastic_momentum": 50,
+            "cci_momentum": 40,
+            "macd_histogram": 30
+          },
+          "support_resistance": {
+            "price_vs_support_resistance": 60,
+            "support_strength": 100,
+            "resistance_distance": 100
+          },
+          "volume": {
+            "obv_trend": 80,
+            "vwap_position": 20,
+            "volume_trend": 70
+          }
+        }
+      },
+      "trading_signal_score": 61.85,
+      "trading_signal_normalized": 4,
+      "trading_signal_rating": "Buy",
+      "trading_signal_description": "Buy signal",
+      "trading_signal_components": {
+        "buy_signals": 49.75,
+        "signal_strength": 80.0
+      },
+      "technical_risk_score": 59.06,
+      "technical_risk_normalized": 3,
+      "technical_risk_level": "Neutral",
+      "technical_risk_description": "Moderate technical risk",
+      "technical_risk_components": {
+        "volatility_risk": 93.75,
+        "trend_reversal_risk": 75,
+        "support_breakdown_risk": 0,
+        "volume_risk": 25
+      },
+      "technical_red_flags": [
+        "RSI at extreme levels (247.0)",
+        "Extremely high volatility (ATR > 15%)"
+      ],
+      "technical_yellow_flags": [
+        "RSI approaching extremes (247.0)",
+        "High volatility (ATR > 10%)"
+      ],
+      "indicators_used": [
+        "rsi_14",
+        "ema_20",
+        "ema_50",
+        "ema_100",
+        "ema_200",
+        "macd_line",
+        "macd_signal",
+        "macd_histogram",
+        "bb_upper",
+        "bb_middle",
+        "bb_lower",
+        "stoch_k",
+        "stoch_d",
+        "cci_20",
+        "atr_14",
+        "vwap",
+        "obv",
+        "vpt",
+        "pivot_point",
+        "resistance_1",
+        "resistance_2",
+        "resistance_3",
+        "support_1",
+        "support_2",
+        "support_3",
+        "swing_high_5d",
+        "swing_low_5d",
+        "swing_high_10d",
+        "swing_low_10d",
+        "swing_high_20d",
+        "swing_low_20d",
+        "week_high",
+        "week_low",
+        "month_high",
+        "month_low",
+        "nearest_support",
+        "nearest_resistance",
+        "support_strength",
+        "resistance_strength",
+        "adx_14",
+        "close",
+        "volume"
+      ]
+    },
+    "stored": false
+  }
+]
