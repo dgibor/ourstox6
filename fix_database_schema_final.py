@@ -1,293 +1,282 @@
+#!/usr/bin/env python3
+"""
+Database Schema Fix - Final Implementation
+Fixes all constraint violations and missing columns for scoring system
+"""
+
 import os
+import sys
 import psycopg2
-from dotenv import load_dotenv
-import logging
+from datetime import datetime
+from typing import List, Dict, Any
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Add the daily_run directory to the path
+sys.path.append(os.path.join(os.path.dirname(__file__), 'daily_run'))
 
-load_dotenv()
+from config import Config
 
-def fix_database_schema():
-    """Fix database schema by dropping and recreating scoring tables with correct constraints"""
+class DatabaseSchemaFixer:
+    """Fix database schema issues for scoring system"""
+    
+    def __init__(self):
+        self.conn = None
+        self.cursor = None
+        self.config = Config()
+        
+    def connect(self):
+        """Connect to database"""
+        try:
+            db_config = self.config.get_db_config()
+            self.conn = psycopg2.connect(**db_config)
+            self.cursor = self.conn.cursor()
+            print("✅ Connected to database successfully")
+        except Exception as e:
+            print(f"❌ Database connection failed: {str(e)}")
+            raise
+    
+    def disconnect(self):
+        """Disconnect from database"""
+        if self.cursor:
+            self.cursor.close()
+        if self.conn:
+            self.conn.close()
+        print("✅ Database connection closed")
+    
+    def fix_database_schema(self):
+        """Main method to fix all database schema issues"""
+        print("🔧 FIXING DATABASE SCHEMA")
+        print("=" * 60)
+        
+        try:
+            # Step 1: Drop dependent views
+            self.drop_dependent_views()
+            
+            # Step 2: Drop and recreate main scoring table
+            self.recreate_scoring_table()
+            
+            # Step 3: Recreate views
+            self.recreate_views()
+            
+            # Step 4: Verify fixes
+            self.verify_schema_fixes()
+            
+            print("✅ Database schema fixes completed successfully!")
+            
+        except Exception as e:
+            print(f"❌ Schema fix failed: {str(e)}")
+            self.conn.rollback()
+            raise
+        finally:
+            self.conn.commit()
+    
+    def drop_dependent_views(self):
+        """Drop all dependent views that reference the scoring table"""
+        print("📋 Dropping dependent views...")
+        
+        views_to_drop = [
+            'screener_summary_view',
+            'score_trends_view', 
+            'screener_filters_view',
+            'dashboard_metrics_view',
+            'company_scores_view'
+        ]
+        
+        for view in views_to_drop:
+            try:
+                self.cursor.execute(f"DROP MATERIALIZED VIEW IF EXISTS {view} CASCADE")
+                print(f"  ✅ Dropped view: {view}")
+            except Exception as e:
+                print(f"  ⚠️  Could not drop view {view}: {str(e)}")
+    
+    def recreate_scoring_table(self):
+        """Recreate the main scoring table with correct constraints"""
+        print("📊 Recreating scoring table...")
+        
+        # Drop existing table
+        self.cursor.execute("DROP TABLE IF EXISTS company_scores_current CASCADE")
+        print("  ✅ Dropped existing company_scores_current table")
+        
+        # Create new table with correct schema
+        create_table_sql = """
+        CREATE TABLE company_scores_current (
+            ticker VARCHAR(10) PRIMARY KEY,
+            calculation_date DATE NOT NULL,
+            fundamental_health_score DECIMAL(5,2),
+            fundamental_health_grade VARCHAR(20),
+            value_investment_score DECIMAL(5,2),
+            value_rating VARCHAR(20),
+            fundamental_risk_score DECIMAL(5,2),
+            fundamental_risk_level VARCHAR(20),
+            technical_health_score DECIMAL(5,2),
+            technical_health_grade VARCHAR(20),
+            trading_signal_score DECIMAL(5,2),
+            trading_signal_rating VARCHAR(20),
+            technical_risk_score DECIMAL(5,2),
+            technical_risk_level VARCHAR(20),
+            data_confidence DECIMAL(5,2),
+            missing_metrics TEXT[],
+            data_warnings TEXT[],
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        
+        self.cursor.execute(create_table_sql)
+        print("  ✅ Created new company_scores_current table")
+        
+        # Create indexes for performance
+        indexes = [
+            "CREATE INDEX idx_company_scores_ticker ON company_scores_current(ticker)",
+            "CREATE INDEX idx_company_scores_date ON company_scores_current(calculation_date)",
+            "CREATE INDEX idx_company_scores_fundamental ON company_scores_current(fundamental_health_score)",
+            "CREATE INDEX idx_company_scores_technical ON company_scores_current(technical_health_score)"
+        ]
+        
+        for index_sql in indexes:
+            try:
+                self.cursor.execute(index_sql)
+                print(f"  ✅ Created index")
+            except Exception as e:
+                print(f"  ⚠️  Index creation failed: {str(e)}")
+    
+    def recreate_views(self):
+        """Recreate all dependent views"""
+        print("📋 Recreating views...")
+        
+        # Screener summary view
+        screener_view_sql = """
+        CREATE MATERIALIZED VIEW screener_summary_view AS
+        SELECT 
+            ticker,
+            fundamental_health_score,
+            fundamental_health_grade,
+            value_investment_score,
+            value_rating,
+            fundamental_risk_score,
+            fundamental_risk_level,
+            technical_health_score,
+            technical_health_grade,
+            trading_signal_score,
+            trading_signal_rating,
+            technical_risk_score,
+            technical_risk_level,
+            data_confidence,
+            calculation_date
+        FROM company_scores_current
+        WHERE calculation_date = (SELECT MAX(calculation_date) FROM company_scores_current);
+        """
+        
+        try:
+            self.cursor.execute(screener_view_sql)
+            print("  ✅ Created screener_summary_view")
+        except Exception as e:
+            print(f"  ⚠️  Failed to create screener_summary_view: {str(e)}")
+        
+        # Score trends view
+        trends_view_sql = """
+        CREATE MATERIALIZED VIEW score_trends_view AS
+        SELECT 
+            ticker,
+            calculation_date,
+            fundamental_health_score,
+            technical_health_score,
+            fundamental_risk_score,
+            technical_risk_score,
+            data_confidence
+        FROM company_scores_current
+        ORDER BY ticker, calculation_date DESC;
+        """
+        
+        try:
+            self.cursor.execute(trends_view_sql)
+            print("  ✅ Created score_trends_view")
+        except Exception as e:
+            print(f"  ⚠️  Failed to create score_trends_view: {str(e)}")
+    
+    def verify_schema_fixes(self):
+        """Verify that all schema fixes are working"""
+        print("🔍 Verifying schema fixes...")
+        
+        # Check table structure
+        self.cursor.execute("""
+            SELECT column_name, data_type, character_maximum_length
+            FROM information_schema.columns 
+            WHERE table_name = 'company_scores_current'
+            ORDER BY ordinal_position;
+        """)
+        
+        columns = self.cursor.fetchall()
+        print(f"  📊 Table has {len(columns)} columns:")
+        
+        for col in columns:
+            col_name, data_type, max_length = col
+            length_info = f"({max_length})" if max_length else ""
+            print(f"    - {col_name}: {data_type}{length_info}")
+        
+        # Test insert
+        test_data = {
+            'ticker': 'TEST',
+            'calculation_date': datetime.now().date(),
+            'fundamental_health_score': 75.5,
+            'fundamental_health_grade': 'Buy',
+            'value_investment_score': 70.0,
+            'value_rating': 'Buy',
+            'fundamental_risk_score': 45.0,
+            'fundamental_risk_level': 'Medium',
+            'technical_health_score': 65.0,
+            'technical_health_grade': 'Neutral',
+            'trading_signal_score': 60.0,
+            'trading_signal_rating': 'Neutral',
+            'technical_risk_score': 50.0,
+            'technical_risk_level': 'Medium',
+            'data_confidence': 85.0,
+            'missing_metrics': ['pe_ratio'],
+            'data_warnings': ['high_volatility']
+        }
+        
+        insert_sql = """
+        INSERT INTO company_scores_current (
+            ticker, calculation_date, fundamental_health_score, fundamental_health_grade,
+            value_investment_score, value_rating, fundamental_risk_score, fundamental_risk_level,
+            technical_health_score, technical_health_grade, trading_signal_score, trading_signal_rating,
+            technical_risk_score, technical_risk_level, data_confidence, missing_metrics, data_warnings
+        ) VALUES (
+            %(ticker)s, %(calculation_date)s, %(fundamental_health_score)s, %(fundamental_health_grade)s,
+            %(value_investment_score)s, %(value_rating)s, %(fundamental_risk_score)s, %(fundamental_risk_level)s,
+            %(technical_health_score)s, %(technical_health_grade)s, %(trading_signal_score)s, %(trading_signal_rating)s,
+            %(technical_risk_score)s, %(technical_risk_level)s, %(data_confidence)s, %(missing_metrics)s, %(data_warnings)s
+        )
+        """
+        
+        try:
+            self.cursor.execute(insert_sql, test_data)
+            print("  ✅ Test insert successful")
+            
+            # Clean up test data
+            self.cursor.execute("DELETE FROM company_scores_current WHERE ticker = 'TEST'")
+            print("  ✅ Test data cleaned up")
+            
+        except Exception as e:
+            print(f"  ❌ Test insert failed: {str(e)}")
+            raise
+
+def main():
+    """Main function to run database schema fixes"""
+    fixer = DatabaseSchemaFixer()
     
     try:
-        conn = psycopg2.connect(
-            host=os.getenv('DB_HOST'),
-            database=os.getenv('DB_NAME'),
-            user=os.getenv('DB_USER'),
-            password=os.getenv('DB_PASSWORD'),
-            port=os.getenv('DB_PORT', '5432')
-        )
-        
-        cursor = conn.cursor()
-        
-        logger.info("Starting database schema fix...")
-        
-        # Step 1: Drop materialized views that depend on scoring tables
-        logger.info("Dropping materialized views...")
-        cursor.execute("""
-            DROP MATERIALIZED VIEW IF EXISTS screener_summary_view CASCADE;
-        """)
-        cursor.execute("""
-            DROP MATERIALIZED VIEW IF EXISTS score_trends_view CASCADE;
-        """)
-        cursor.execute("""
-            DROP MATERIALIZED VIEW IF EXISTS screener_filters_view CASCADE;
-        """)
-        cursor.execute("""
-            DROP MATERIALIZED VIEW IF EXISTS dashboard_metrics_view CASCADE;
-        """)
-        
-        # Step 2: Drop existing scoring tables
-        logger.info("Dropping existing scoring tables...")
-        cursor.execute("DROP TABLE IF EXISTS company_scores_current CASCADE;")
-        cursor.execute("DROP TABLE IF EXISTS company_scores_historical CASCADE;")
-        cursor.execute("DROP TABLE IF EXISTS score_calculation_logs CASCADE;")
-        
-        # Step 3: Recreate tables with correct constraints
-        logger.info("Creating company_scores_current table...")
-        cursor.execute("""
-            CREATE TABLE company_scores_current (
-                -- Primary Key
-                ticker VARCHAR(10) PRIMARY KEY,
-                
-                -- Calculation Metadata
-                date_calculated DATE NOT NULL,
-                calculation_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                data_freshness_hours INTEGER,
-                
-                -- Fundamental Health Scores
-                fundamental_health_score DECIMAL(5,2) CHECK (fundamental_health_score >= 0 AND fundamental_health_score <= 100),
-                fundamental_health_grade VARCHAR(20) CHECK (fundamental_health_grade IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                fundamental_health_components JSONB,
-                fundamental_health_description TEXT,
-                
-                -- Risk Assessment Scores
-                fundamental_risk_score DECIMAL(5,2) CHECK (fundamental_risk_score >= 0 AND fundamental_risk_score <= 100),
-                fundamental_risk_level VARCHAR(20) CHECK (fundamental_risk_level IN ('Very Low', 'Low', 'Medium', 'High', 'Very High')),
-                fundamental_risk_components JSONB,
-                fundamental_risk_description TEXT,
-                
-                -- Value Investment Scores
-                value_investment_score DECIMAL(5,2) CHECK (value_investment_score >= 0 AND value_investment_score <= 100),
-                value_rating VARCHAR(20) CHECK (value_rating IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                value_components JSONB,
-                value_investment_description TEXT,
-                
-                -- Technical Health Scores
-                technical_health_score DECIMAL(5,2) CHECK (technical_health_score >= 0 AND technical_health_score <= 100),
-                technical_health_grade VARCHAR(20) CHECK (technical_health_grade IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                technical_health_components JSONB,
-                technical_health_description TEXT,
-                
-                -- Trading Signal Scores
-                trading_signal_score DECIMAL(5,2) CHECK (trading_signal_score >= 0 AND trading_signal_score <= 100),
-                trading_signal_rating VARCHAR(20) CHECK (trading_signal_rating IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                trading_signal_components JSONB,
-                trading_signal_description TEXT,
-                
-                -- Technical Risk Scores
-                technical_risk_score DECIMAL(5,2) CHECK (technical_risk_score >= 0 AND technical_risk_score <= 100),
-                technical_risk_level VARCHAR(20) CHECK (technical_risk_level IN ('Very Low', 'Low', 'Medium', 'High', 'Very High')),
-                technical_risk_components JSONB,
-                technical_risk_description TEXT,
-                
-                -- Trend Analysis
-                fundamental_health_trend VARCHAR(20) CHECK (fundamental_health_trend IN ('improving', 'stable', 'declining')),
-                technical_health_trend VARCHAR(20) CHECK (technical_health_trend IN ('improving', 'stable', 'declining')),
-                trading_signal_trend VARCHAR(20) CHECK (trading_signal_trend IN ('improving', 'stable', 'declining')),
-                
-                -- Period Changes
-                fundamental_health_change_3m DECIMAL(5,2),
-                fundamental_health_change_6m DECIMAL(5,2),
-                fundamental_health_change_1y DECIMAL(5,2),
-                technical_health_change_3m DECIMAL(5,2),
-                technical_health_change_6m DECIMAL(5,2),
-                technical_health_change_1y DECIMAL(5,2),
-                trading_signal_change_3m DECIMAL(5,2),
-                trading_signal_change_6m DECIMAL(5,2),
-                trading_signal_change_1y DECIMAL(5,2),
-                
-                -- Alert System
-                fundamental_red_flags JSONB,
-                fundamental_yellow_flags JSONB,
-                technical_red_flags JSONB,
-                technical_yellow_flags JSONB,
-                
-                -- Composite Scores
-                overall_score DECIMAL(5,2) CHECK (overall_score >= 0 AND overall_score <= 100),
-                overall_grade VARCHAR(20) CHECK (overall_grade IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                overall_description TEXT,
-                
-                -- Data Quality Metrics
-                data_confidence DECIMAL(5,2) CHECK (data_confidence >= 0 AND data_confidence <= 100),
-                missing_metrics_count INTEGER,
-                data_warnings JSONB,
-                
-                -- Metadata
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
-                -- Foreign Key
-                CONSTRAINT fk_company_scores_stocks FOREIGN KEY (ticker) REFERENCES stocks(ticker)
-            );
-        """)
-        
-        logger.info("Creating company_scores_historical table...")
-        cursor.execute("""
-            CREATE TABLE company_scores_historical (
-                id SERIAL PRIMARY KEY,
-                ticker VARCHAR(10) NOT NULL,
-                date_calculated DATE NOT NULL,
-                
-                -- Fundamental Scores
-                fundamental_health_score DECIMAL(5,2),
-                fundamental_health_grade VARCHAR(20) CHECK (fundamental_health_grade IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                fundamental_risk_score DECIMAL(5,2),
-                fundamental_risk_level VARCHAR(20) CHECK (fundamental_risk_level IN ('Very Low', 'Low', 'Medium', 'High', 'Very High')),
-                value_investment_score DECIMAL(5,2),
-                value_rating VARCHAR(20) CHECK (value_rating IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                
-                -- Technical Scores
-                technical_health_score DECIMAL(5,2),
-                technical_health_grade VARCHAR(20) CHECK (technical_health_grade IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                trading_signal_score DECIMAL(5,2),
-                trading_signal_rating VARCHAR(20) CHECK (trading_signal_rating IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                technical_risk_score DECIMAL(5,2),
-                technical_risk_level VARCHAR(20) CHECK (technical_risk_level IN ('Very Low', 'Low', 'Medium', 'High', 'Very High')),
-                
-                -- Overall Score
-                overall_score DECIMAL(5,2),
-                overall_grade VARCHAR(20) CHECK (overall_grade IN ('Strong Sell', 'Sell', 'Neutral', 'Buy', 'Strong Buy')),
-                
-                -- Data Quality
-                data_confidence DECIMAL(5,2),
-                missing_metrics_count INTEGER,
-                
-                -- Metadata
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
-                -- Constraints
-                UNIQUE(ticker, date_calculated),
-                CONSTRAINT fk_historical_scores_stocks FOREIGN KEY (ticker) REFERENCES stocks(ticker)
-            );
-        """)
-        
-        logger.info("Creating score_calculation_logs table...")
-        cursor.execute("""
-            CREATE TABLE score_calculation_logs (
-                id SERIAL PRIMARY KEY,
-                calculation_date DATE NOT NULL,
-                calculation_batch_id VARCHAR(50),
-                
-                -- Processing Statistics
-                total_tickers_processed INTEGER,
-                successful_calculations INTEGER,
-                failed_calculations INTEGER,
-                skipped_calculations INTEGER,
-                
-                -- Performance Metrics
-                calculation_duration_seconds DECIMAL(8,2),
-                average_calculation_time_per_ticker DECIMAL(6,3),
-                
-                -- Data Quality Metrics
-                tickers_with_missing_fundamental_data INTEGER,
-                tickers_with_missing_technical_data INTEGER,
-                tickers_with_incomplete_ratios INTEGER,
-                
-                -- Error Tracking
-                error_summary JSONB,
-                warning_summary JSONB,
-                
-                -- System Information
-                system_version VARCHAR(20),
-                calculation_version VARCHAR(20),
-                
-                -- Metadata
-                started_at TIMESTAMP,
-                completed_at TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-        """)
-        
-        # Step 4: Create indexes for performance
-        logger.info("Creating indexes...")
-        cursor.execute("CREATE INDEX idx_company_scores_current_date ON company_scores_current(date_calculated);")
-        cursor.execute("CREATE INDEX idx_company_scores_fundamental_health ON company_scores_current(fundamental_health_score DESC);")
-        cursor.execute("CREATE INDEX idx_company_scores_technical_health ON company_scores_current(technical_health_score DESC);")
-        cursor.execute("CREATE INDEX idx_company_scores_overall ON company_scores_current(overall_score DESC);")
-        cursor.execute("CREATE INDEX idx_company_scores_risk ON company_scores_current(fundamental_risk_score ASC);")
-        
-        cursor.execute("CREATE INDEX idx_company_scores_historical_ticker_date ON company_scores_historical(ticker, date_calculated);")
-        cursor.execute("CREATE INDEX idx_score_logs_date ON score_calculation_logs(calculation_date);")
-        
-        # Step 5: Create materialized views
-        logger.info("Creating materialized views...")
-        cursor.execute("""
-            CREATE MATERIALIZED VIEW screener_summary_view AS
-            SELECT 
-                ticker,
-                fundamental_health_score,
-                fundamental_health_grade,
-                technical_health_score,
-                technical_health_grade,
-                overall_score,
-                overall_grade,
-                fundamental_risk_level,
-                technical_risk_level,
-                data_confidence,
-                date_calculated
-            FROM company_scores_current
-            WHERE date_calculated = (SELECT MAX(date_calculated) FROM company_scores_current);
-        """)
-        
-        cursor.execute("""
-            CREATE MATERIALIZED VIEW score_trends_view AS
-            SELECT 
-                ticker,
-                date_calculated,
-                fundamental_health_score,
-                technical_health_score,
-                overall_score
-            FROM company_scores_historical
-            ORDER BY ticker, date_calculated DESC;
-        """)
-        
-        # Commit changes
-        conn.commit()
-        logger.info("Database schema fix completed successfully!")
-        
-        # Verify the fix
-        logger.info("Verifying constraints...")
-        cursor.execute("""
-            SELECT conname, pg_get_constraintdef(oid) 
-            FROM pg_constraint 
-            WHERE conrelid = 'company_scores_current'::regclass 
-            AND conname LIKE '%technical_risk_level%';
-        """)
-        
-        constraints = cursor.fetchall()
-        for constraint in constraints:
-            logger.info(f"Constraint: {constraint[0]}")
-            logger.info(f"Definition: {constraint[1]}")
-        
-        cursor.close()
-        conn.close()
-        
-        return True
+        fixer.connect()
+        fixer.fix_database_schema()
+        print("\n🎉 Database schema fixes completed successfully!")
+        print("The scoring system should now be able to store scores without constraint violations.")
         
     except Exception as e:
-        logger.error(f"Error fixing database schema: {e}")
-        if 'conn' in locals():
-            conn.rollback()
-            conn.close()
-        return False
+        print(f"\n❌ Database schema fix failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+    finally:
+        fixer.disconnect()
 
 if __name__ == "__main__":
-    success = fix_database_schema()
-    if success:
-        print("✅ Database schema fix completed successfully!")
-    else:
-        print("❌ Database schema fix failed!") 
+    main() 

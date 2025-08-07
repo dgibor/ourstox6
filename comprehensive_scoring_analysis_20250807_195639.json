@@ -1,0 +1,22 @@
+{
+  "analysis_results": {
+    "analysis_date": "2025-08-07T19:56:39.938377",
+    "total_tickers": 20,
+    "successful_count": 19,
+    "success_rate": 95.0,
+    "results": [
+      {
+        "ticker": "AAPL",
+        "sector": "Technology",
+        "fundamental": {
+          "fundamental_health_score": 60.87706043956044,
+          "value_investment_score": 62.84182692307692,
+          "fundamental_risk_score": 49.213581730769235,
+          "fundamental_health_grade": "Neutral",
+          "fundamental_health_description": "Average fundamental health",
+          "value_rating": "Buy",
+          "value_investment_description": "Good value opportunity",
+          "fundamental_risk_level": "Medium",
+          "fundamental_risk_description": "Medium risk profile",
+          "ticker": "AAPL",
+          "calculation_date": 
