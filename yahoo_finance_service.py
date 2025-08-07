@@ -124,7 +124,11 @@ class YahooFinanceService:
             
             # Calculate EV/EBITDA if missing
             if not ratios.get('ev_ebitda') and ratios.get('enterprise_value') and ratios.get('ebitda'):
-                ratios['ev_ebitda'] = ratios['enterprise_value'] / ratios['ebitda']
+                ebitda = ratios['ebitda']
+                if ebitda and ebitda != 0:
+                    ratios['ev_ebitda'] = ratios['enterprise_value'] / ebitda
+                else:
+                    logger.warning(f"EBITDA is zero or None, skipping EV/EBITDA calculation")
             
             # Remove None values and return
             return {k: v for k, v in ratios.items() if v is not None}
@@ -147,31 +151,59 @@ class YahooFinanceService:
                 # Calculate ratios if base data is available
                 if 'Total Assets' in latest_bs and 'Net Income' in latest_is:
                     if not ratios.get('roa'):
-                        additional_ratios['roa'] = (latest_is['Net Income'] / latest_bs['Total Assets']) * 100
+                        total_assets = latest_bs['Total Assets']
+                        if total_assets and total_assets != 0:
+                            additional_ratios['roa'] = (latest_is['Net Income'] / total_assets) * 100
+                        else:
+                            logger.warning(f"Total Assets is zero or None, skipping ROA calculation")
                 
                 if 'Total Stockholder Equity' in latest_bs and 'Net Income' in latest_is:
                     if not ratios.get('roe'):
-                        additional_ratios['roe'] = (latest_is['Net Income'] / latest_bs['Total Stockholder Equity']) * 100
+                        total_equity = latest_bs['Total Stockholder Equity']
+                        if total_equity and total_equity != 0:
+                            additional_ratios['roe'] = (latest_is['Net Income'] / total_equity) * 100
+                        else:
+                            logger.warning(f"Total Stockholder Equity is zero or None, skipping ROE calculation")
                 
                 if 'Total Current Assets' in latest_bs and 'Total Current Liabilities' in latest_bs:
                     if not ratios.get('current_ratio'):
-                        additional_ratios['current_ratio'] = latest_bs['Total Current Assets'] / latest_bs['Total Current Liabilities']
+                        current_liabilities = latest_bs['Total Current Liabilities']
+                        if current_liabilities and current_liabilities != 0:
+                            additional_ratios['current_ratio'] = latest_bs['Total Current Assets'] / current_liabilities
+                        else:
+                            logger.warning(f"Total Current Liabilities is zero or None, skipping current_ratio calculation")
                 
                 if 'Total Debt' in latest_bs and 'Total Stockholder Equity' in latest_bs:
                     if not ratios.get('debt_to_equity'):
-                        additional_ratios['debt_to_equity'] = latest_bs['Total Debt'] / latest_bs['Total Stockholder Equity']
+                        total_equity = latest_bs['Total Stockholder Equity']
+                        if total_equity and total_equity != 0:
+                            additional_ratios['debt_to_equity'] = latest_bs['Total Debt'] / total_equity
+                        else:
+                            logger.warning(f"Total Stockholder Equity is zero or None, skipping debt_to_equity calculation")
                 
                 if 'Total Revenue' in latest_is and 'Gross Profit' in latest_is:
                     if not ratios.get('gross_margin'):
-                        additional_ratios['gross_margin'] = (latest_is['Gross Profit'] / latest_is['Total Revenue']) * 100
+                        total_revenue = latest_is['Total Revenue']
+                        if total_revenue and total_revenue != 0:
+                            additional_ratios['gross_margin'] = (latest_is['Gross Profit'] / total_revenue) * 100
+                        else:
+                            logger.warning(f"Total Revenue is zero or None, skipping gross margin calculation")
                 
                 if 'Total Revenue' in latest_is and 'Operating Income' in latest_is:
                     if not ratios.get('operating_margin'):
-                        additional_ratios['operating_margin'] = (latest_is['Operating Income'] / latest_is['Total Revenue']) * 100
+                        total_revenue = latest_is['Total Revenue']
+                        if total_revenue and total_revenue != 0:
+                            additional_ratios['operating_margin'] = (latest_is['Operating Income'] / total_revenue) * 100
+                        else:
+                            logger.warning(f"Total Revenue is zero or None, skipping operating margin calculation")
                 
                 if 'Total Revenue' in latest_is and 'Net Income' in latest_is:
                     if not ratios.get('net_margin'):
-                        additional_ratios['net_margin'] = (latest_is['Net Income'] / latest_is['Total Revenue']) * 100
+                        total_revenue = latest_is['Total Revenue']
+                        if total_revenue and total_revenue != 0:
+                            additional_ratios['net_margin'] = (latest_is['Net Income'] / total_revenue) * 100
+                        else:
+                            logger.warning(f"Total Revenue is zero or None, skipping net margin calculation")
                         
         except Exception as e:
             logger.warning(f"Error calculating additional ratios: {str(e)}")
