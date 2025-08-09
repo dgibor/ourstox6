@@ -485,27 +485,51 @@ class DatabaseManager:
         return 0
     
     def _batch_update_indicators(self, ticker: str, target_date: str, fields: List[str], values: List[Any]) -> int:
-        """Optimized batch update for technical indicators"""
-        # Split into smaller chunks to avoid massive queries
-        chunk_size = 20  # Update 20 fields at a time
+        """Optimized single-transaction update for technical indicators"""
+        if not fields:
+            return 0
+            
+        # Use a single transaction with all updates
+        all_values = values + [ticker, target_date]
+        query = f"""
+        UPDATE daily_charts 
+        SET {', '.join(fields)}
+        WHERE ticker = %s AND date = %s
+        """
+        
+        try:
+            with self.get_cursor() as cursor:
+                cursor.execute(query, tuple(all_values))
+                return len(fields) if cursor.rowcount > 0 else 0
+        except Exception as e:
+            self.logger.error(f"Batch update failed for {ticker}: {e}")
+            # Fallback to chunked approach if the single query fails
+            return self._fallback_chunked_update(ticker, target_date, fields, values)
+    
+    def _fallback_chunked_update(self, ticker: str, target_date: str, fields: List[str], values: List[Any]) -> int:
+        """Fallback chunked update if single update fails"""
+        chunk_size = 10  # Smaller chunks for fallback
         total_updated = 0
         
         for i in range(0, len(fields), chunk_size):
             chunk_fields = fields[i:i + chunk_size]
-            chunk_values = values[i:i + chunk_size].copy()  # Make a copy to avoid corrupting original
-            
-            # Build query for this chunk
+            chunk_values = values[i:i + chunk_size].copy()
             chunk_values.extend([ticker, target_date])
+            
             query = f"""
             UPDATE daily_charts 
             SET {', '.join(chunk_fields)}
             WHERE ticker = %s AND date = %s
             """
             
-            with self.get_cursor() as cursor:
-                cursor.execute(query, tuple(chunk_values))
-                if cursor.rowcount > 0:
-                    total_updated += len(chunk_fields)
+            try:
+                with self.get_cursor() as cursor:
+                    cursor.execute(query, tuple(chunk_values))
+                    if cursor.rowcount > 0:
+                        total_updated += len(chunk_fields)
+            except Exception as e:
+                self.logger.error(f"Chunk update failed for {ticker} chunk {i//chunk_size + 1}: {e}")
+                continue
         
         return total_updated
 

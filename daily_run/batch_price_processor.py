@@ -487,6 +487,7 @@ class BatchPriceProcessor:
             return
             
         logger.info(f"Storing {len(price_data)} daily price records")
+        logger.info(f"[PRICE DEBUG] Raw price data received: {price_data}")
         start_time = time.time()
         
         try:
