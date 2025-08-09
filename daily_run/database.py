@@ -459,6 +459,66 @@ class DatabaseManager:
                 self.logger.error(f"Failed to update technical indicators for {ticker}: {e}")
                 return 0
         return 0
+
+    def upsert_company_scores(self, ticker: str, score_data: Dict[str, Any]) -> bool:
+        """
+        Upsert company scores using the database function
+        """
+        try:
+            # Call the enhanced upsert_company_scores database function with sentiment support
+            query = """
+            SELECT upsert_company_scores(
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            """
+            
+            # Convert dicts and lists to JSON strings for JSONB parameters
+            import json
+            
+            params = (
+                ticker,
+                score_data.get('fundamental_health_score', 50.0),
+                score_data.get('fundamental_health_grade', 'Neutral'),
+                json.dumps(score_data.get('fundamental_health_components', {})),
+                score_data.get('fundamental_risk_score', 50.0),
+                score_data.get('fundamental_risk_level', 'Medium'),
+                json.dumps(score_data.get('fundamental_risk_components', {})),
+                score_data.get('value_investment_score', 50.0),
+                score_data.get('value_rating', 'Neutral'),
+                json.dumps(score_data.get('value_components', {})),
+                score_data.get('technical_health_score', 50.0),
+                score_data.get('technical_health_grade', 'Neutral'),
+                json.dumps(score_data.get('technical_health_components', {})),
+                score_data.get('trading_signal_score', 50.0),
+                score_data.get('trading_signal_rating', 'Neutral'),
+                json.dumps(score_data.get('trading_signal_components', {})),
+                score_data.get('technical_risk_score', 50.0),
+                score_data.get('technical_risk_level', 'Medium'),
+                json.dumps(score_data.get('technical_risk_components', {})),
+                score_data.get('overall_score', 50.0),
+                score_data.get('overall_grade', 'Neutral'),
+                json.dumps(score_data.get('fundamental_red_flags', [])),
+                json.dumps(score_data.get('fundamental_yellow_flags', [])),
+                json.dumps(score_data.get('technical_red_flags', [])),
+                json.dumps(score_data.get('technical_yellow_flags', [])),
+                json.dumps(score_data.get('sentiment_components', {})),
+                score_data.get('sentiment_score', 0.0),
+                score_data.get('sentiment_grade', 'Neutral'),
+                score_data.get('sentiment_source', 'unknown')
+            )
+            
+            with self.get_cursor() as cursor:
+                cursor.execute(query, params)
+                
+            self.logger.info(f"Successfully upserted scores for {ticker}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to upsert scores for {ticker}: {e}")
+            return False
+
     def create_indexes_if_missing(self):
         """Create database indexes for better performance"""
         # Use separate connections for non-transactional index creation

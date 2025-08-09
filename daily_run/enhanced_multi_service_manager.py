@@ -134,7 +134,7 @@ class EnhancedMultiServiceManager:
     
     def _initialize_services(self):
         """Initialize all available services"""
-        self.logger.info("🔧 Initializing enhanced multi-service manager")
+        self.logger.info("Initializing enhanced multi-service manager")
         
         for service_id, config in self.service_configs.items():
             if not config.enabled:
@@ -146,7 +146,7 @@ class EnhancedMultiServiceManager:
                 if service:
                     self.service_instances[service_id] = service
                     self.api_metrics[service_id] = APICallMetrics()
-                    self.logger.info(f"✅ {config.name} initialized")
+                    self.logger.info(f"{config.name} initialized")
                 else:
                     self.logger.warning(f"⚠️  {config.name} failed to initialize")
                     

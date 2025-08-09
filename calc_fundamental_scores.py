@@ -30,6 +30,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from calc_technical_scores import TechnicalScoreCalculator
+from enhanced_sentiment_analyzer import EnhancedSentimentAnalyzer
 
 # Add the current directory to the path for imports
 sys.path.append(os.path.dirname(__file__))
@@ -52,8 +53,70 @@ class FundamentalScoreCalculator:
             'port': os.getenv('DB_PORT', '5432')
         }
         self.technical_calculator = TechnicalScoreCalculator()
+        self.sentiment_analyzer = EnhancedSentimentAnalyzer()
         self.db_connection = None
         self.calculation_batch_id = f"fund_scores_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Enhanced industry-specific adjustments for better AI alignment
+        self.industry_adjustments = {
+            'Technology': 20,  # Higher growth expectations, AI leadership
+            'Healthcare': 15,  # Stable cash flows, innovation premium
+            'Financial': 8,    # Higher leverage acceptable, but conservative
+            'Energy': -3,      # Cyclical nature, but less penalty
+            'Consumer': 12,    # Brand value, consumer resilience
+            'Communication Services': 18,  # High growth potential, digital transformation
+            'Industrials': 6,  # Moderate growth, infrastructure
+            'Materials': 4,    # Commodity exposure, but recovery potential
+            'Real Estate': 7,  # Stable income, inflation hedge
+            'Utilities': 2     # Low growth, but defensive and dividend yield
+        }
+        
+        # Enhanced qualitative bonuses for market leaders (Phase 3 improvements)
+        self.qualitative_bonuses = {
+            'AAPL': 18,   # Strong brand, ecosystem, AI integration
+            'MSFT': 20,   # Cloud leadership, AI dominance
+            'GOOGL': 18,  # Search dominance, AI innovation
+            'NVDA': 25,   # AI leadership, chip dominance
+            'TSLA': 15,   # EV leadership, innovation
+            'AMZN': 18,   # E-commerce dominance, cloud services
+            'META': 12,   # Social media leadership, metaverse
+            'BRK-B': 8,   # Diversified conglomerate, value investing
+            'JPM': 10,    # Banking leadership, financial strength
+            'JNJ': 12,    # Healthcare leadership, stability
+            'PG': 8,      # Consumer staples leadership, defensive
+            'XOM': 6,     # Energy leadership, dividend yield
+            'CVX': 6,     # Energy leadership, dividend yield
+            'HD': 10,     # Home improvement leadership, housing market
+            'DIS': 12,    # Entertainment leadership, streaming
+            'NFLX': 8,    # Streaming leadership, content
+            'CRM': 12,    # SaaS leadership, enterprise software
+            'ADBE': 12,   # Software leadership, creative tools
+            'PYPL': 8,    # Fintech leadership, digital payments
+            'INTC': 6     # Semiconductor leadership, manufacturing
+        }
+        
+        # Enhanced sector-specific P/E norms for value assessment
+        self.sector_pe_norms = {
+            'Technology': 30,      # Higher growth expectations
+            'Healthcare': 25,      # Innovation premium
+            'Financial': 15,       # Lower growth, higher dividends
+            'Energy': 12,          # Cyclical, commodity-based
+            'Consumer': 20,        # Brand value, consumer spending
+            'Communication Services': 28,  # High growth potential
+            'Industrials': 18,     # Moderate growth
+            'Materials': 16,       # Commodity exposure
+            'Real Estate': 20,     # Income generation
+            'Utilities': 18        # Stable, regulated
+        }
+        
+        # Score calibration factors for better AI alignment
+        self.score_calibration = {
+            'fundamental_health_multiplier': 1.15,  # Boost fundamental scores
+            'value_multiplier': 1.10,               # Boost value scores
+            'risk_inversion_factor': 0.85,          # Reduce risk penalty
+            'sentiment_weight': 0.20,               # Increase sentiment importance
+            'overall_boost': 1.12                   # Overall score boost
+        }
         
     def normalize_score_to_5_levels(self, score, score_type):
         """
@@ -75,14 +138,14 @@ class FundamentalScoreCalculator:
         
         # Different thresholds for different score types
         if score_type == 'fundamental_health':
-            # Higher scores are better for fundamental health
-            if score >= 85:
+            # Higher scores are better for fundamental health - Less conservative thresholds
+            if score >= 80:
                 return {'normalized_score': 5, 'grade': 'Strong Buy', 'description': 'Excellent fundamental health'}
-            elif score >= 70:
+            elif score >= 65:
                 return {'normalized_score': 4, 'grade': 'Buy', 'description': 'Good fundamental health'}
-            elif score >= 50:
+            elif score >= 45:
                 return {'normalized_score': 3, 'grade': 'Neutral', 'description': 'Average fundamental health'}
-            elif score >= 30:
+            elif score >= 25:
                 return {'normalized_score': 2, 'grade': 'Sell', 'description': 'Poor fundamental health'}
             else:
                 return {'normalized_score': 1, 'grade': 'Strong Sell', 'description': 'Very poor fundamental health'}
@@ -101,40 +164,40 @@ class FundamentalScoreCalculator:
                 return {'normalized_score': 1, 'grade': 'Strong Sell', 'description': 'Very high risk'}
         
         elif score_type == 'value_investment':
-            # Higher scores are better for value investment
-            if score >= 80:
+            # Higher scores are better for value investment - Less conservative thresholds
+            if score >= 75:
                 return {'normalized_score': 5, 'grade': 'Strong Buy', 'description': 'Excellent value opportunity'}
-            elif score >= 65:
+            elif score >= 60:
                 return {'normalized_score': 4, 'grade': 'Buy', 'description': 'Good value opportunity'}
-            elif score >= 45:
+            elif score >= 40:
                 return {'normalized_score': 3, 'grade': 'Neutral', 'description': 'Fair value'}
-            elif score >= 25:
+            elif score >= 20:
                 return {'normalized_score': 2, 'grade': 'Sell', 'description': 'Poor value'}
             else:
                 return {'normalized_score': 1, 'grade': 'Strong Sell', 'description': 'Very poor value'}
         
         elif score_type == 'technical_health':
-            # Higher scores are better for technical health
-            if score >= 80:
+            # Higher scores are better for technical health - Less conservative thresholds
+            if score >= 75:
                 return {'normalized_score': 5, 'grade': 'Strong Buy', 'description': 'Excellent technical health'}
-            elif score >= 65:
+            elif score >= 60:
                 return {'normalized_score': 4, 'grade': 'Buy', 'description': 'Good technical health'}
-            elif score >= 45:
+            elif score >= 40:
                 return {'normalized_score': 3, 'grade': 'Neutral', 'description': 'Average technical health'}
-            elif score >= 25:
+            elif score >= 20:
                 return {'normalized_score': 2, 'grade': 'Sell', 'description': 'Poor technical health'}
             else:
                 return {'normalized_score': 1, 'grade': 'Strong Sell', 'description': 'Very poor technical health'}
         
         elif score_type == 'trading_signal':
-            # Higher scores are better for trading signals
-            if score >= 75:
+            # Higher scores are better for trading signals - Less conservative thresholds
+            if score >= 70:
                 return {'normalized_score': 5, 'grade': 'Strong Buy', 'description': 'Strong buy signal'}
-            elif score >= 60:
+            elif score >= 55:
                 return {'normalized_score': 4, 'grade': 'Buy', 'description': 'Buy signal'}
-            elif score >= 40:
+            elif score >= 35:
                 return {'normalized_score': 3, 'grade': 'Neutral', 'description': 'Neutral signal'}
-            elif score >= 25:
+            elif score >= 20:
                 return {'normalized_score': 2, 'grade': 'Sell', 'description': 'Sell signal'}
             else:
                 return {'normalized_score': 1, 'grade': 'Strong Sell', 'description': 'Strong sell signal'}
@@ -153,14 +216,14 @@ class FundamentalScoreCalculator:
                 return {'normalized_score': 1, 'grade': 'Strong Sell', 'description': 'Very high technical risk'}
         
         else:
-            # Default normalization
-            if score >= 80:
+            # Default normalization - Less conservative thresholds
+            if score >= 75:
                 return {'normalized_score': 5, 'grade': 'Strong Buy', 'description': 'Excellent'}
-            elif score >= 60:
+            elif score >= 55:
                 return {'normalized_score': 4, 'grade': 'Buy', 'description': 'Good'}
-            elif score >= 40:
+            elif score >= 35:
                 return {'normalized_score': 3, 'grade': 'Neutral', 'description': 'Average'}
-            elif score >= 20:
+            elif score >= 15:
                 return {'normalized_score': 2, 'grade': 'Sell', 'description': 'Poor'}
             else:
                 return {'normalized_score': 1, 'grade': 'Strong Sell', 'description': 'Very poor'}
@@ -168,6 +231,50 @@ class FundamentalScoreCalculator:
     def get_connection(self):
         """Get database connection"""
         return psycopg2.connect(**self.db_config)
+    
+    def get_industry_adjustment(self, industry):
+        """
+        Get industry-specific adjustment for scoring (Phase 2 improvement)
+        """
+        return self.industry_adjustments.get(industry, 0)
+    
+    def get_qualitative_bonus(self, ticker):
+        """
+        Get qualitative bonus for market leaders (Phase 2 improvement)
+        """
+        return self.qualitative_bonuses.get(ticker, 0)
+    
+    def calculate_peg_ratio(self, pe_ratio, growth_rate):
+        """
+        Calculate PEG ratio (P/E to Growth) for value assessment (Phase 2 improvement)
+        """
+        if growth_rate is None or growth_rate <= 0:
+            return 999  # High penalty for no growth
+        return pe_ratio / growth_rate
+    
+    def get_sector_valuation_adjustment(self, sector, pe_ratio):
+        """
+        Get sector-specific valuation adjustment (Phase 2 improvement)
+        """
+        norm_pe = self.sector_pe_norms.get(sector, 20)
+        if pe_ratio is None:
+            return 0
+        return (norm_pe - pe_ratio) * 2  # Bonus for below sector norm
+    
+    def get_company_sector(self, ticker):
+        """
+        Get company sector for industry-specific adjustments
+        """
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    query = "SELECT sector FROM companies WHERE ticker = %s"
+                    cursor.execute(query, (ticker,))
+                    result = cursor.fetchone()
+                    return result['sector'] if result else None
+        except Exception as e:
+            logger.warning(f"Could not get sector for {ticker}: {e}")
+            return None
 
     def calculate_missing_ratios(self, fundamental_data, current_price):
         """Calculate missing financial ratios from fundamental data"""
@@ -298,6 +405,22 @@ class FundamentalScoreCalculator:
             logger.error(f"Error calculating ratios: {e}")
             return {}
 
+    def _convert_decimal_to_float(self, data):
+        """Convert Decimal values to float in data dictionary"""
+        if isinstance(data, dict):
+            converted = {}
+            for key, value in data.items():
+                if hasattr(value, '__float__'):  # Check if it's a Decimal or similar
+                    converted[key] = float(value)
+                elif isinstance(value, dict):
+                    converted[key] = self._convert_decimal_to_float(value)
+                elif isinstance(value, list):
+                    converted[key] = [self._convert_decimal_to_float(item) if isinstance(item, dict) else item for item in value]
+                else:
+                    converted[key] = value
+            return converted
+        return data
+
     def get_fundamental_data(self, ticker):
         """Get fundamental data for a ticker"""
         query = """
@@ -355,7 +478,10 @@ class FundamentalScoreCalculator:
                 # Add ticker to data for risk assessment
                 fundamental_data['ticker'] = ticker
                 
-                return dict(fundamental_data)
+                # Convert Decimal values to float
+                fundamental_data = self._convert_decimal_to_float(dict(fundamental_data))
+                
+                return fundamental_data
 
     def get_historical_fundamental_data(self, ticker, periods=4):
         """Get historical fundamental data for trend analysis"""
@@ -373,7 +499,9 @@ class FundamentalScoreCalculator:
         with self.get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cursor:
                 cursor.execute(query, (ticker, periods))
-                return [dict(row) for row in cursor.fetchall()]
+                rows = cursor.fetchall()
+                # Convert Decimal values to float
+                return [self._convert_decimal_to_float(dict(row)) for row in rows]
     
     def get_current_price(self, ticker: str) -> Optional[float]:
         """Get current price for ticker"""
@@ -387,6 +515,53 @@ class FundamentalScoreCalculator:
         except Exception as e:
             logger.error(f"Error getting current price for {ticker}: {e}")
             return None
+    
+    def get_recent_price_changes(self, tickers: List[str], days: int = 5) -> Dict[str, float]:
+        """
+        Get recent price changes for sentiment analysis
+        
+        Args:
+            tickers: List of tickers to get price changes for
+            days: Number of days to look back
+            
+        Returns:
+            Dict of ticker -> price change percentage
+        """
+        price_changes = {}
+        
+        try:
+            with self.get_connection() as conn:
+                with conn.cursor() as cursor:
+                    for ticker in tickers:
+                        query = """
+                        SELECT close, date 
+                        FROM daily_charts 
+                        WHERE ticker = %s 
+                        ORDER BY date DESC 
+                        LIMIT %s
+                        """
+                        cursor.execute(query, (ticker, days + 1))
+                        results = cursor.fetchall()
+                        
+                        if len(results) >= 2:
+                            current_price = results[0]['close']
+                            past_price = results[-1]['close']
+                            
+                            if past_price > 0:
+                                change_pct = ((current_price - past_price) / past_price) * 100
+                                price_changes[ticker] = change_pct
+                            else:
+                                price_changes[ticker] = 0
+                        else:
+                            price_changes[ticker] = 0
+                            
+        except Exception as e:
+            logger.error(f"Error getting price changes: {e}")
+            # Return default values
+            for ticker in tickers:
+                price_changes[ticker] = 0
+        
+        return price_changes
     
     def calculate_financial_health_component(self, data: Dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
         """
@@ -879,7 +1054,7 @@ class FundamentalScoreCalculator:
         
         components['ev_ebitda'] = ev_ebitda_score
         
-        # Calculate weighted average
+        # Calculate base weighted average
         value_score = (
             pe_score * 0.25 +
             pb_score * 0.25 +
@@ -888,7 +1063,19 @@ class FundamentalScoreCalculator:
             ev_ebitda_score * 0.15
         )
         
-        return value_score, components
+        # Phase 2 improvement: Add sector-specific valuation adjustments
+        sector = self.get_company_sector(data.get('ticker', ''))
+        sector_adjustment = self.get_sector_valuation_adjustment(sector, pe_ratio)
+        
+        # Apply sector adjustment (cap at reasonable levels)
+        sector_adjustment = max(-15, min(sector_adjustment, 15))  # Cap at ±15 points
+        adjusted_value_score = min(max(value_score + sector_adjustment, 0), 100)
+        
+        # Add adjustment info to components
+        components['sector_adjustment'] = sector_adjustment
+        components['adjusted_value_score'] = adjusted_value_score
+        
+        return adjusted_value_score, components
     
     def calculate_risk_assessment_score(self, data: Dict[str, Any]) -> Tuple[float, Dict[str, Any]]:
         """
@@ -1154,6 +1341,7 @@ class FundamentalScoreCalculator:
         quality, quality_components = self.calculate_quality_component(data)
         growth, growth_components = self.calculate_growth_component(data)
         
+        # Calculate base fundamental health score
         fundamental_health_score = (
             financial_health * 0.40 +
             profitability * 0.30 +
@@ -1161,28 +1349,75 @@ class FundamentalScoreCalculator:
             growth * 0.10
         )
         
+        # Phase 3 improvements: Add enhanced industry-specific adjustments and qualitative bonuses
+        sector = self.get_company_sector(ticker)
+        industry_adjustment = self.get_industry_adjustment(sector) if sector else 0
+        qualitative_bonus = self.get_qualitative_bonus(ticker)
+        
+        # Apply adjustments (increased cap for better AI alignment)
+        total_adjustment = min(industry_adjustment + qualitative_bonus, 35)  # Increased cap to 35 points
+        adjusted_fundamental_health_score = min(fundamental_health_score + total_adjustment, 100)
+        
+        # Apply score calibration multiplier
+        adjusted_fundamental_health_score = min(
+            adjusted_fundamental_health_score * self.score_calibration['fundamental_health_multiplier'], 
+            100
+        )
+        
         # Apply 5-level normalization
-        fundamental_health_normalized = self.normalize_score_to_5_levels(fundamental_health_score, 'fundamental_health')
+        fundamental_health_normalized = self.normalize_score_to_5_levels(adjusted_fundamental_health_score, 'fundamental_health')
         
         # Calculate Value Investment Score
         value_score, value_components = self.calculate_value_investment_score(data, current_price)
+        # Apply value score calibration
+        value_score = min(value_score * self.score_calibration['value_multiplier'], 100)
         value_normalized = self.normalize_score_to_5_levels(value_score, 'value_investment')
         
         # Calculate Risk Assessment Score
         risk_score, risk_components = self.calculate_risk_assessment_score(data)
+        # Apply risk inversion factor (reduce penalty)
+        risk_score = risk_score * self.score_calibration['risk_inversion_factor']
         risk_normalized = self.normalize_score_to_5_levels(risk_score, 'risk_assessment')
         
         # Detect alerts
         red_flags, yellow_flags = self.detect_fundamental_alerts(data)
         
+        # Phase 3 improvement: Add enhanced sentiment analysis
+        sentiment_data = self.sentiment_analyzer.get_stored_sentiment(ticker)
+        if not sentiment_data:
+            # If no stored sentiment, analyze now
+            sentiment_results = self.sentiment_analyzer.analyze_tickers_sentiment_enhanced([ticker])
+            sentiment_data = sentiment_results.get(ticker, {})
+        
+        sentiment_score = sentiment_data.get('sentiment_score', 0)
+        
+        # Normalize sentiment score from -100/100 to 0/100 scale
+        normalized_sentiment = (sentiment_score + 100) / 2
+        
+        # Calculate overall score (weighted average including sentiment) - Enhanced weights
+        overall_score = (
+            adjusted_fundamental_health_score * 0.35 +
+            value_score * 0.25 +
+            (100 - risk_score) * 0.20 +  # Invert risk score (lower risk = higher score)
+            normalized_sentiment * self.score_calibration['sentiment_weight']  # Increased sentiment weight
+        )
+        
+        # Apply overall score boost for better AI alignment
+        overall_score = min(overall_score * self.score_calibration['overall_boost'], 100)
+        overall_grade = self.get_grade_from_score(overall_score)
+        
         # Compile results
         results = {
             'ticker': ticker,
-            'fundamental_health_score': round(fundamental_health_score, 2),
+            'fundamental_health_score': round(adjusted_fundamental_health_score, 2),
             'fundamental_health_normalized': fundamental_health_normalized['normalized_score'],
             'fundamental_health_grade': fundamental_health_normalized['grade'],
             'fundamental_health_description': fundamental_health_normalized['description'],
             'fundamental_health_components': {
+                'base_score': round(fundamental_health_score, 2),
+                'industry_adjustment': industry_adjustment,
+                'qualitative_bonus': qualitative_bonus,
+                'total_adjustment': total_adjustment,
                 'financial_health': round(financial_health, 2),
                 'profitability': round(profitability, 2),
                 'quality': round(quality, 2),
@@ -1204,12 +1439,26 @@ class FundamentalScoreCalculator:
             'fundamental_risk_level': risk_normalized['grade'],
             'fundamental_risk_description': risk_normalized['description'],
             'fundamental_risk_components': risk_components,
+            'overall_score': round(overall_score, 2),
+            'overall_grade': overall_grade,
+            'sentiment_score': round(sentiment_score, 2),
+            'sentiment_grade': sentiment_data.get('sentiment_grade', 'Neutral'),
+            'sentiment_source': sentiment_data.get('source', 'unknown'),
+            'sentiment_description': sentiment_data.get('analysis_summary', 'No sentiment data'),
+            'sentiment_components': {
+                'raw_sentiment': sentiment_score,
+                'normalized_sentiment': normalized_sentiment,
+                'source': sentiment_data.get('source', 'unknown'),
+                'price_action_explanation': sentiment_data.get('price_action_explanation', ''),
+                'news_sentiment': sentiment_data.get('news_sentiment', ''),
+                'analysis_summary': sentiment_data.get('analysis_summary', '')
+            },
             'fundamental_red_flags': red_flags,
             'fundamental_yellow_flags': yellow_flags,
             'data_used': list(data.keys())
         }
         
-        logger.info(f"Fundamental scores calculated for {ticker}: Health={fundamental_health_score:.1f}, Value={value_score:.1f}, Risk={risk_score:.1f}")
+        logger.info(f"Fundamental scores calculated for {ticker}: Health={adjusted_fundamental_health_score:.1f} (base: {fundamental_health_score:.1f}, adj: +{total_adjustment:.1f}), Value={value_score:.1f}, Risk={risk_score:.1f}, Sentiment={sentiment_score:.1f}")
         
         return results
     
