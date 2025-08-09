@@ -28,10 +28,14 @@ def setup_paths():
     cwd = os.getcwd()
     logger.info(f"📁 Current working directory: {cwd}")
     
-    # Add current directory to Python path
-    if cwd not in sys.path:
-        sys.path.insert(0, cwd)
-        logger.info(f"✅ Added {cwd} to Python path")
+    # Check if we're in the expected Railway directory
+    expected_dirs = ['/app', '/workspace', cwd]
+    for expected_dir in expected_dirs:
+        if os.path.exists(expected_dir):
+            logger.info(f"✅ Found directory: {expected_dir}")
+            if expected_dir not in sys.path:
+                sys.path.insert(0, expected_dir)
+                logger.info(f"✅ Added {expected_dir} to Python path")
     
     # Add daily_run directory to path
     daily_run_dir = os.path.join(cwd, 'daily_run')
@@ -39,18 +43,29 @@ def setup_paths():
         sys.path.insert(0, daily_run_dir)
         logger.info(f"✅ Added {daily_run_dir} to Python path")
     
-    # List all Python files in current directory
-    logger.info("📋 Python files in current directory:")
-    for file in os.listdir(cwd):
-        if file.endswith('.py'):
+    # List all files in current directory
+    logger.info("📋 All files in current directory:")
+    try:
+        for file in os.listdir(cwd):
             logger.info(f"  - {file}")
+    except Exception as e:
+        logger.error(f"❌ Error listing directory: {e}")
     
     # Check if daily_run directory exists and list its contents
     if os.path.exists(daily_run_dir):
-        logger.info(f"📋 Python files in {daily_run_dir}:")
-        for file in os.listdir(daily_run_dir):
-            if file.endswith('.py'):
+        logger.info(f"📋 Files in {daily_run_dir}:")
+        try:
+            for file in os.listdir(daily_run_dir):
                 logger.info(f"  - {file}")
+        except Exception as e:
+            logger.error(f"❌ Error listing daily_run directory: {e}")
+    else:
+        logger.warning(f"⚠️ daily_run directory not found at {daily_run_dir}")
+    
+    # Log Python path
+    logger.info("📋 Current Python path:")
+    for path in sys.path:
+        logger.info(f"  - {path}")
 
 def main():
     """Run the daily trading system once and exit"""
