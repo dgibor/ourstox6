@@ -12,7 +12,7 @@ cronSchedule = "5 22 * * *"
 
 # Environment variables for the cron job
 [deploy.env]
-PYTHONPATH = "/app:/app/daily_run"
+PYTHONPATH = "/app:/app/daily_run:/app/utility_functions"
 PYTHONUNBUFFERED = "1"
 TZ = "America/New_York"
 WORKDIR = "/app"

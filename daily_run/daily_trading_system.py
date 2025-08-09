@@ -383,16 +383,65 @@ class DailyTradingSystem:
         PRIORITY 1: Calculate technical indicators based on updated price data.
         This is called immediately after price updates on trading days.
         """
-        logger.info("PRIORITY 1: Calculating technical indicators for all stocks")
+        logger.info("📊 PRIORITY 1: Calculating technical indicators for all stocks")
         
         try:
             start_time = time.time()
             
             # Get all active tickers (since we just updated prices for all)
             tickers = self._get_active_tickers()
-            logger.info(f"Calculating technical indicators for {len(tickers)} tickers")
+            logger.info(f"📊 Processing technical indicators for {len(tickers)} tickers")
+            
+            # Check if comprehensive calculator is available
+            logger.info("🔍 Checking technical calculator availability...")
+            try:
+                import sys
+                import os
+                
+                # Check paths for the calculator
+                calc_paths = [
+                    os.path.join(os.getcwd(), 'utility_functions', 'comprehensive_technical_indicators_fix.py'),
+                    os.path.join(os.path.dirname(os.getcwd()), 'utility_functions', 'comprehensive_technical_indicators_fix.py'),
+                    '/app/utility_functions/comprehensive_technical_indicators_fix.py'
+                ]
+                
+                logger.info("🔍 Checking calculator paths:")
+                calculator_found = False
+                for path in calc_paths:
+                    exists = os.path.exists(path)
+                    logger.info(f"   {path}: {'✅ EXISTS' if exists else '❌ MISSING'}")
+                    if exists:
+                        calculator_found = True
+                        break
+                
+                if not calculator_found:
+                    logger.error("❌ ComprehensiveTechnicalCalculator not found - skipping technical indicators")
+                    return {
+                        'phase': 'priority_1_technical_indicators',
+                        'status': 'skipped',
+                        'reason': 'calculator_not_found',
+                        'total_tickers': len(tickers),
+                        'successful_calculations': 0,
+                        'failed_calculations': 0,
+                        'processing_time': time.time() - start_time
+                    }
+                
+                logger.info("✅ Technical calculator found - proceeding with calculations")
+                
+            except Exception as import_error:
+                logger.error(f"❌ Error checking technical calculator: {import_error}")
+                return {
+                    'phase': 'priority_1_technical_indicators',
+                    'status': 'failed',
+                    'error': f'Calculator check failed: {str(import_error)}',
+                    'total_tickers': len(tickers),
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': time.time() - start_time
+                }
             
             # Calculate technical indicators for all tickers
+            logger.info("📊 Starting technical indicator calculations...")
             technical_result = self._calculate_technical_indicators(tickers)
             
             processing_time = time.time() - start_time
@@ -406,7 +455,7 @@ class DailyTradingSystem:
                 'processing_time': processing_time
             }
             
-            logger.info(f"PRIORITY 1: Technical indicators completed - {result['successful_calculations']}/{result['total_tickers']} successful")
+            logger.info(f"✅ PRIORITY 1: Technical indicators completed - {result['successful_calculations']}/{result['total_tickers']} successful")
             
             return result
             
