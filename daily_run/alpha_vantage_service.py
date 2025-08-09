@@ -57,7 +57,7 @@ class AlphaVantageService:
         if not self.api_key:
             self.logger.warning("⚠️ Alpha Vantage API key not found - service will be limited")
         else:
-            self.logger.info("✅ Alpha Vantage service initialized")
+            self.logger.info("Alpha Vantage service initialized")
     
     def _check_rate_limit(self) -> bool:
         """Check if we can make an API call within rate limits"""

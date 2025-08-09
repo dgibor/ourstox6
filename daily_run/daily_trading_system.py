@@ -134,7 +134,7 @@ class DailyTradingSystem:
                     'technical_indicators': technical_result
                 }
             else:
-                logger.info("📈 PRIORITY 1: Market was closed - skipping to Priority 2")
+                logger.info("PRIORITY 1: Market was closed - skipping to Priority 2")
                 priority1_result = {
                     'status': 'skipped',
                     'reason': 'market_closed'
@@ -158,6 +158,10 @@ class DailyTradingSystem:
             missing_fundamentals_result = self._fill_missing_fundamental_data()
             logger.info("✅ Missing fundamental data fill completed")
             
+            # PRIORITY 5: Calculate daily scores for all companies
+            logger.info("PRIORITY 5: Calculating daily scores")
+            scoring_result = self._calculate_daily_scores()
+            
             # Cleanup: Remove delisted stocks to prevent future API errors
             logger.info("🧹 STEP 7: Starting cleanup of delisted stocks...")
             cleanup_result = self._cleanup_delisted_stocks()
@@ -171,14 +175,15 @@ class DailyTradingSystem:
                 'priority_2_earnings_fundamentals': earnings_fundamentals_result,
                 'priority_3_historical_data': historical_result,
                 'priority_4_missing_fundamentals': missing_fundamentals_result,
+                'priority_5_daily_scores': scoring_result,
                 'cleanup_delisted_stocks': cleanup_result
             })
             
-            logger.info("✅ Daily Trading System completed successfully - All priorities processed")
+            logger.info("Daily Trading System completed successfully - All priorities processed")
             return results
             
         except Exception as e:
-            logger.error(f"❌ Daily trading process failed: {e}")
+            logger.error(f"Daily trading process failed: {e}")
             self.error_handler.handle_error(
                 "Daily trading process failed", e, ErrorSeverity.CRITICAL
             )
@@ -194,7 +199,7 @@ class DailyTradingSystem:
         Returns:
             Dictionary with trading day status
         """
-        logger.info("📊 Checking if today was a trading day")
+        logger.info("Checking if today was a trading day")
         
         try:
             if force_run:
@@ -216,9 +221,9 @@ class DailyTradingSystem:
             }
             
             if market_open:
-                logger.info(f"✅ Trading day confirmed: {message}")
+                logger.info(f"Trading day confirmed: {message}")
             else:
-                logger.info(f"❌ Not a trading day: {message}")
+                logger.info(f"Not a trading day: {message}")
             
             return result
             
@@ -253,7 +258,7 @@ class DailyTradingSystem:
         Update daily_charts table with latest prices using batch processing.
         Only processes tickers that don't already have today's data.
         """
-        logger.info("💰 Updating daily prices with batch processing")
+        logger.info("Updating daily prices with batch processing")
         
         try:
             start_time = time.time()
@@ -263,7 +268,7 @@ class DailyTradingSystem:
             logger.info(f"Processing {len(tickers_needing_updates)} tickers needing price updates")
             
             if not tickers_needing_updates:
-                logger.info("✅ All tickers already have today's price data - skipping price updates")
+                logger.info("All tickers already have today's price data - skipping price updates")
                 return {
                     'phase': 'daily_price_update',
                     'status': 'skipped',
@@ -294,8 +299,8 @@ class DailyTradingSystem:
                 'data_stored_in': 'daily_charts'
             }
             
-            logger.info(f"✅ Daily prices updated: {result['successful_updates']}/{result['total_tickers']} successful")
-            logger.info(f"📊 API calls used: {api_calls_used}")
+            logger.info(f"Daily prices updated: {result['successful_updates']}/{result['total_tickers']} successful")
+            logger.info(f"API calls used: {api_calls_used}")
             
             return result
             
@@ -315,7 +320,7 @@ class DailyTradingSystem:
         """
         Calculate fundamentals and technical indicators for all tickers.
         """
-        logger.info("📈 Calculating fundamentals and technical indicators")
+        logger.info("Calculating fundamentals and technical indicators")
         
         try:
             start_time = time.time()
@@ -347,9 +352,9 @@ class DailyTradingSystem:
                 'processing_time': processing_time
             }
             
-            logger.info(f"✅ Fundamentals and technicals calculated")
-            logger.info(f"📊 Fundamentals: {result['fundamentals']['successful']} successful")
-            logger.info(f"📊 Technicals: {result['technicals']['successful']} successful")
+            logger.info(f"Fundamentals and technicals calculated")
+            logger.info(f"Fundamentals: {result['fundamentals']['successful']} successful")
+            logger.info(f"Technicals: {result['technicals']['successful']} successful")
             
             return result
             
@@ -369,7 +374,7 @@ class DailyTradingSystem:
         PRIORITY 1: Calculate technical indicators based on updated price data.
         This is called immediately after price updates on trading days.
         """
-        logger.info("📈 PRIORITY 1: Calculating technical indicators for all stocks")
+        logger.info("PRIORITY 1: Calculating technical indicators for all stocks")
         
         try:
             start_time = time.time()
@@ -392,7 +397,7 @@ class DailyTradingSystem:
                 'processing_time': processing_time
             }
             
-            logger.info(f"✅ PRIORITY 1: Technical indicators completed - {result['successful_calculations']}/{result['total_tickers']} successful")
+            logger.info(f"PRIORITY 1: Technical indicators completed - {result['successful_calculations']}/{result['total_tickers']} successful")
             
             return result
             
@@ -413,7 +418,7 @@ class DailyTradingSystem:
         PRIORITY 2: Update fundamental information for companies with earnings announcements that day.
         Calculate fundamental ratios based on updated stock prices.
         """
-        logger.info("📊 PRIORITY 2: Processing earnings announcements and fundamental updates")
+        logger.info("PRIORITY 2: Processing earnings announcements and fundamental updates")
         
         try:
             start_time = time.time()
@@ -471,7 +476,7 @@ class DailyTradingSystem:
                 'processing_time': processing_time
             }
             
-            logger.info(f"✅ PRIORITY 2: Earnings fundamentals completed - {successful_updates}/{len(earnings_tickers)} successful")
+            logger.info(f"PRIORITY 2: Earnings fundamentals completed - {successful_updates}/{len(earnings_tickers)} successful")
             
             return result
             
@@ -568,7 +573,7 @@ class DailyTradingSystem:
                 'batches_processed': len(ticker_batches)
             }
             
-            logger.info(f"✅ PRIORITY 3: Historical data completed - {successful_updates} tickers updated")
+            logger.info(f"PRIORITY 3: Historical data completed - {successful_updates} tickers updated")
             
             return result
             
@@ -589,7 +594,7 @@ class DailyTradingSystem:
         PRIORITY 4: Fill missing fundamental data for companies.
         Uses any remaining API calls after priorities 1, 2, and 3.
         """
-        logger.info("🔍 PRIORITY 4: Filling missing fundamental data")
+        logger.info("PRIORITY 4: Filling missing fundamental data")
         
         try:
             start_time = time.time()
@@ -651,7 +656,7 @@ class DailyTradingSystem:
                 'processing_time': processing_time
             }
             
-            logger.info(f"✅ PRIORITY 4: Missing fundamentals completed - {successful_updates} tickers updated")
+            logger.info(f"PRIORITY 4: Missing fundamentals completed - {successful_updates} tickers updated")
             
             return result
             
@@ -788,7 +793,7 @@ class DailyTradingSystem:
                 'processing_time': time.time() - start_time
             }
             
-            logger.info(f"✅ Cleanup completed - {removed_count} delisted stocks removed")
+            logger.info(f"Cleanup completed - {removed_count} delisted stocks removed")
             
             return result
             
@@ -802,6 +807,262 @@ class DailyTradingSystem:
                 'error': str(e),
                 'removed_count': 0
             }
+
+    def _calculate_daily_scores(self) -> Dict:
+        """
+        PRIORITY 5: Calculate daily scores for all companies.
+        Calculates fundamental, technical, and composite scores using existing scoring modules.
+        """
+        logger.info("PRIORITY 5: Calculating daily scores for all companies")
+        
+        try:
+            start_time = time.time()
+            
+            # Import scoring modules
+            try:
+                import sys
+                import os
+                # Add parent directory to path to find scoring modules
+                parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                if parent_dir not in sys.path:
+                    sys.path.append(parent_dir)
+                
+                from calc_fundamental_scores import FundamentalScoreCalculator
+                from calc_technical_scores_enhanced import EnhancedTechnicalScoreCalculator
+                logger.info("Successfully imported scoring modules")
+            except ImportError as e:
+                logger.error(f"Failed to import scoring modules: {e}")
+                return {
+                    'phase': 'priority_5_daily_scores',
+                    'error': f'Import error: {str(e)}',
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Initialize scoring calculators
+            fundamental_calc = FundamentalScoreCalculator()
+            technical_calc = EnhancedTechnicalScoreCalculator()
+            
+            # Get all active tickers that have both fundamental and technical data
+            tickers_with_data = self._get_tickers_with_complete_data()
+            logger.info(f"Found {len(tickers_with_data)} tickers with complete data for scoring")
+            
+            if not tickers_with_data:
+                logger.warning("No tickers with complete data found for scoring")
+                return {
+                    'phase': 'priority_5_daily_scores',
+                    'status': 'skipped',
+                    'reason': 'no_tickers_with_complete_data',
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Calculate scores for each ticker
+            successful_calculations = 0
+            failed_calculations = 0
+            
+            for ticker in tickers_with_data:
+                try:
+                    logger.debug(f"Calculating scores for {ticker}")
+                    
+                    # Calculate fundamental scores
+                    fundamental_scores = fundamental_calc.calculate_fundamental_scores(ticker)
+                    
+                    # Calculate enhanced technical scores
+                    technical_scores = technical_calc.calculate_enhanced_technical_scores(ticker)
+                    
+                    if fundamental_scores and technical_scores:
+                        # Store combined scores
+                        success = self._store_combined_scores(ticker, fundamental_scores, technical_scores)
+                        if success:
+                            successful_calculations += 1
+                            logger.debug(f"Successfully calculated and stored scores for {ticker}")
+                        else:
+                            failed_calculations += 1
+                            logger.warning(f"Failed to store scores for {ticker}")
+                    else:
+                        failed_calculations += 1
+                        logger.warning(f"Failed to calculate scores for {ticker}")
+                        
+                except Exception as e:
+                    failed_calculations += 1
+                    logger.error(f"Error calculating scores for {ticker}: {e}")
+            
+            processing_time = time.time() - start_time
+            
+            result = {
+                'phase': 'priority_5_daily_scores',
+                'tickers_processed': len(tickers_with_data),
+                'successful_calculations': successful_calculations,
+                'failed_calculations': failed_calculations,
+                'processing_time': processing_time
+            }
+            
+            logger.info(f"PRIORITY 5: Daily scores completed - {successful_calculations}/{len(tickers_with_data)} successful")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in Priority 5 daily scores: {e}")
+            self.error_handler.handle_error(
+                "Priority 5 daily scores failed", e, ErrorSeverity.MEDIUM
+            )
+            return {
+                'phase': 'priority_5_daily_scores',
+                'error': str(e),
+                'successful_calculations': 0,
+                'failed_calculations': 0,
+                'processing_time': time.time() - start_time
+            }
+
+    def _get_tickers_with_complete_data(self) -> List[str]:
+        """
+        Get tickers that have both fundamental and technical data for scoring.
+        """
+        try:
+            # First check if technical_indicators table exists
+            check_table_query = """
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_name = 'technical_indicators'
+            );
+            """
+            table_exists = self.db.fetch_one(check_table_query)
+            
+            if not table_exists or not table_exists[0]:
+                logger.warning("Technical indicators table does not exist, using only fundamental data")
+                # Fallback to only fundamental data
+                query = """
+                SELECT DISTINCT s.ticker
+                FROM stocks s
+                INNER JOIN company_fundamentals cf ON s.ticker = cf.ticker
+                WHERE cf.last_updated >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY s.ticker
+                LIMIT 100
+                """
+            else:
+                # Use both fundamental and technical data
+                query = """
+                SELECT DISTINCT s.ticker
+                FROM stocks s
+                INNER JOIN company_fundamentals cf ON s.ticker = cf.ticker
+                INNER JOIN technical_indicators ti ON s.ticker = ti.ticker
+                WHERE cf.last_updated >= CURRENT_DATE - INTERVAL '30 days'
+                AND ti.last_updated >= CURRENT_DATE - INTERVAL '30 days'
+                ORDER BY s.ticker
+                LIMIT 100
+                """
+            
+            results = self.db.execute_query(query)
+            return [row[0] for row in results]
+        except Exception as e:
+            logger.error(f"Error getting tickers with complete data: {e}")
+            return []
+
+    def _store_combined_scores(self, ticker: str, fundamental_scores: Dict, technical_scores: Dict) -> bool:
+        """
+        Store combined fundamental and technical scores in the scoring tables.
+        """
+        try:
+            # Calculate composite score
+            fundamental_health = fundamental_scores.get('fundamental_health_score', 50.0)
+            technical_health = technical_scores.get('technical_health_score', 50.0)
+            value_score = fundamental_scores.get('value_investment_score', 50.0)
+            trading_signal = technical_scores.get('trading_signal_score', 50.0)
+            
+            # Weighted composite score
+            composite_score = (
+                fundamental_health * 0.3 +
+                technical_health * 0.2 +
+                value_score * 0.25 +
+                trading_signal * 0.15 +
+                (100 - fundamental_scores.get('fundamental_risk_score', 50.0)) * 0.1
+            )
+            
+            # Prepare data for storage
+            score_data = {
+                'ticker': ticker,
+                'date_calculated': datetime.now().date(),
+                'calculation_timestamp': datetime.now(),
+                'fundamental_health_score': fundamental_scores.get('fundamental_health_score', 50.0),
+                'fundamental_health_grade': fundamental_scores.get('fundamental_health_grade', 'Neutral'),
+                'fundamental_health_components': fundamental_scores.get('fundamental_health_components', {}),
+                'fundamental_risk_score': fundamental_scores.get('fundamental_risk_score', 50.0),
+                'fundamental_risk_level': fundamental_scores.get('fundamental_risk_level', 'Neutral'),
+                'fundamental_risk_components': fundamental_scores.get('fundamental_risk_components', {}),
+                'value_investment_score': fundamental_scores.get('value_investment_score', 50.0),
+                'value_rating': fundamental_scores.get('value_rating', 'Neutral'),
+                'value_components': fundamental_scores.get('value_components', {}),
+                'technical_health_score': technical_scores.get('technical_health_score', 50.0),
+                'technical_health_grade': technical_scores.get('technical_health_grade', 'Neutral'),
+                'technical_health_components': technical_scores.get('technical_health_components', {}),
+                'trading_signal_score': technical_scores.get('trading_signal_score', 50.0),
+                'trading_signal_rating': technical_scores.get('trading_signal_rating', 'Neutral'),
+                'trading_signal_components': technical_scores.get('trading_signal_components', {}),
+                'technical_risk_score': technical_scores.get('technical_risk_score', 50.0),
+                'technical_risk_level': technical_scores.get('technical_risk_level', 'Neutral'),
+                'technical_risk_components': technical_scores.get('technical_risk_components', {}),
+                'overall_score': composite_score,
+                'overall_grade': self._get_overall_grade_from_score(composite_score),
+                'fundamental_red_flags': fundamental_scores.get('fundamental_red_flags', []),
+                'fundamental_yellow_flags': fundamental_scores.get('fundamental_yellow_flags', []),
+                'technical_red_flags': technical_scores.get('technical_red_flags', []),
+                'technical_yellow_flags': technical_scores.get('technical_yellow_flags', [])
+            }
+            
+            # Store in database
+            success = self.db.upsert_company_scores(ticker, score_data)
+            
+            if success:
+                logger.debug(f"Successfully stored scores for {ticker}")
+                return True
+            else:
+                logger.warning(f"Failed to store scores for {ticker}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error storing combined scores for {ticker}: {e}")
+            return False
+
+    def _get_grade_from_score(self, score: float) -> str:
+        """
+        Convert numerical score to letter grade.
+        """
+        if score >= 90:
+            return 'A+'
+        elif score >= 80:
+            return 'A'
+        elif score >= 70:
+            return 'B+'
+        elif score >= 60:
+            return 'B'
+        elif score >= 50:
+            return 'C+'
+        elif score >= 40:
+            return 'C'
+        elif score >= 30:
+            return 'D'
+        else:
+            return 'F'
+
+    def _get_overall_grade_from_score(self, score: float) -> str:
+        """
+        Convert numerical score to overall grade for database storage.
+        Uses the same scale as other ratings: Strong Buy, Buy, Neutral, Sell, Strong Sell
+        """
+        if score >= 80:
+            return 'Strong Buy'
+        elif score >= 65:
+            return 'Buy'
+        elif score >= 45:
+            return 'Neutral'
+        elif score >= 25:
+            return 'Sell'
+        else:
+            return 'Strong Sell'
 
     def _store_zero_indicators(self, ticker: str):
         """
@@ -1147,8 +1408,8 @@ class DailyTradingSystem:
                 'processing_time': processing_time
             }
             
-            logger.info(f"✅ Historical data populated: {successful_updates} tickers updated")
-            logger.info(f"📊 API calls used for history: {api_calls_used}")
+            logger.info(f"Historical data populated: {successful_updates} tickers updated")
+            logger.info(f"API calls used for history: {api_calls_used}")
             
             return result
             
@@ -1229,7 +1490,7 @@ class DailyTradingSystem:
         """
         Update fundamentals for tickers that need updates on non-trading days.
         """
-        logger.info("📊 Updating fundamentals on non-trading day")
+        logger.info("Updating fundamentals on non-trading day")
         
         try:
             start_time = time.time()
@@ -1283,8 +1544,8 @@ class DailyTradingSystem:
                 'processing_time': processing_time
             }
             
-            logger.info(f"✅ Fundamentals updated on non-trading day: {successful_updates} tickers")
-            logger.info(f"📊 API calls used for fundamentals: {api_calls_used}")
+            logger.info(f"Fundamentals updated on non-trading day: {successful_updates} tickers")
+            logger.info(f"API calls used for fundamentals: {api_calls_used}")
             
             return result
             
@@ -1327,7 +1588,7 @@ class DailyTradingSystem:
                 'processing_time': processing_time
             }
             
-            logger.info(f"✅ Delisted stocks check completed: {delisted_count} removed")
+            logger.info(f"Delisted stocks check completed: {delisted_count} removed")
             
             return result
             
@@ -1896,7 +2157,7 @@ def main():
     
     # Print summary
     print("\n" + "="*50)
-    print("📊 DAILY TRADING SYSTEM SUMMARY")
+    print("DAILY TRADING SYSTEM SUMMARY")
     print("="*50)
     print(f"Processing Time: {results.get('total_processing_time', 0):.2f}s")
     print(f"API Calls Used: {results.get('total_api_calls_used', 0)}")
@@ -1904,10 +2165,10 @@ def main():
     print(f"Phases Failed: {results.get('summary', {}).get('failed_phases', 0)}")
     
     if 'error' in results:
-        print(f"❌ System Error: {results['error']}")
+        print(f"System Error: {results['error']}")
         return 1
     else:
-        print("✅ System completed successfully")
+        print("System completed successfully")
         return 0
 
 

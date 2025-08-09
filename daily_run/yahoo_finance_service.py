@@ -55,7 +55,7 @@ class YahooFinanceService:
         self.max_requests_per_minute = 60  # Conservative limit
         self.delay_between_requests = 1.0  # 1 second between requests
         
-        self.logger.info("✅ Yahoo Finance service initialized (free, no API key required)")
+        self.logger.info("Yahoo Finance service initialized (free, no API key required)")
     
     def get_data(self, ticker: str) -> Optional[Dict[str, Any]]:
         """

@@ -53,7 +53,7 @@ class FinnhubService:
         if not self.api_key:
             self.logger.warning("⚠️ Finnhub API key not found - service will be limited")
         else:
-            self.logger.info("✅ Finnhub service initialized")
+            self.logger.info("Finnhub service initialized")
     
     def __del__(self):
         if hasattr(self, 'rate_limiter'):
