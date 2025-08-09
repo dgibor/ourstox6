@@ -84,6 +84,12 @@ class UniversalTechnicalScoreCalculator:
             df = pd.DataFrame(results, columns=['date', 'open', 'high', 'low', 'close', 'volume'])
             df = df.sort_values('date').reset_index(drop=True)
             
+            # Ensure price columns are float to prevent dtype warnings during calculations
+            price_cols = ['open', 'high', 'low', 'close', 'volume']
+            for col in price_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').astype(float)
+            
             # Apply intelligent scaling corruption fix
             df_fixed = self._apply_intelligent_scaling_fix(df, ticker)
             
@@ -101,6 +107,8 @@ class UniversalTechnicalScoreCalculator:
         # Method 1: Detect sudden 100x scaling jumps
         scaling_detected = False
         for col in price_cols:
+            # Ensure column is float type to avoid dtype warnings
+            df_fixed[col] = df_fixed[col].astype(float)
             values = df_fixed[col].values
             for i in range(1, len(values)):
                 ratio = values[i] / values[i-1]
@@ -118,6 +126,8 @@ class UniversalTechnicalScoreCalculator:
         # Method 2: Detect bimodal distribution if no jumps found
         if not scaling_detected:
             for col in price_cols:
+                # Ensure column is float type to avoid dtype warnings
+                df_fixed[col] = df_fixed[col].astype(float)
                 values = df_fixed[col].values
                 if len(values) < 10:
                     continue
