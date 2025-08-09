@@ -168,8 +168,8 @@ class DailyTradingSystem:
             logger.info("✅ Missing fundamental data fill completed")
             
             # PRIORITY 5: Calculate daily scores for all companies
-            logger.info("PRIORITY 5: Calculating daily scores")
-            scoring_result = self._calculate_daily_scores()
+            logger.info("🎯 PRIORITY 5: Calculating daily scores")
+            scoring_result = self._calculate_daily_scores_with_progress()
             
             # Cleanup: Remove delisted stocks to prevent future API errors
             logger.info("🧹 STEP 7: Starting cleanup of delisted stocks...")
@@ -460,7 +460,7 @@ class DailyTradingSystem:
             
             # Calculate technical indicators for all tickers
             logger.info("📊 Starting technical indicator calculations...")
-            technical_result = self._calculate_technical_indicators(tickers)
+            technical_result = self._calculate_technical_indicators_with_progress(tickers)
             
             processing_time = time.time() - start_time
             
@@ -489,12 +489,246 @@ class DailyTradingSystem:
                 'failed_calculations': 0
             }
 
+    def _calculate_technical_indicators_with_progress(self, tickers: List[str]) -> Dict:
+        """
+        Calculate technical indicators for all tickers with detailed progress logging.
+        """
+        logger.info(f"🚀 STARTING TECHNICAL INDICATOR PROCESSING for {len(tickers)} tickers")
+        start_time = time.time()
+        
+        successful_calculations = 0
+        failed_calculations = 0
+        historical_fetches = 0
+        
+        try:
+            for i, ticker in enumerate(tickers, 1):
+                ticker_start_time = time.time()
+                
+                # Progress indicator
+                logger.info(f"📊 [{i}/{len(tickers)}] Processing technical indicators for {ticker}")
+                
+                try:
+                    # Get price data for technical calculations
+                    logger.debug(f"   🔍 Fetching price data for {ticker}")
+                    price_data = self.db.get_price_data_for_technicals(ticker, days=100)
+                    
+                    if not price_data or len(price_data) < 20:
+                        logger.info(f"   ⚠️  Insufficient data for {ticker}: {len(price_data) if price_data else 0} days, fetching historical data (API calls remaining: {1000 - self.api_calls_used})")
+                        # Fetch historical data if insufficient
+                        historical_data = self._get_historical_data(ticker)
+                        if historical_data and historical_data.get('data'):
+                            self._store_historical_data(ticker, historical_data['data'])
+                            price_data = self.db.get_price_data_for_technicals(ticker, days=100)
+                            historical_fetches += 1
+                            logger.info(f"   ✅ Fetched {len(historical_data['data'])} historical records for {ticker}")
+                    
+                    if price_data and len(price_data) >= 20:
+                        logger.debug(f"   📈 Calculating indicators for {ticker} with {len(price_data)} days of data")
+                        
+                        # Calculate technical indicators using existing method
+                        indicators = self._calculate_single_ticker_technicals(ticker, price_data)
+                        
+                        if indicators:
+                            # Store indicators in database
+                            logger.debug(f"   💾 Storing {len(indicators)} indicators for {ticker}")
+                            self.db.update_technical_indicators(ticker, indicators)
+                            
+                            ticker_time = time.time() - ticker_start_time
+                            successful_calculations += 1
+                            
+                            logger.info(f"   ✅ {ticker}: Completed {len(indicators)} indicators in {ticker_time:.2f}s")
+                            
+                            # ETA calculation
+                            avg_time_per_ticker = (time.time() - start_time) / i
+                            remaining_tickers = len(tickers) - i
+                            eta_seconds = remaining_tickers * avg_time_per_ticker
+                            eta_minutes = eta_seconds / 60
+                            
+                            if i % 10 == 0 or i == len(tickers):  # Progress update every 10 tickers
+                                logger.info(f"📊 PROGRESS: {i}/{len(tickers)} completed ({i/len(tickers)*100:.1f}%) - ETA: {eta_minutes:.1f} minutes")
+                        else:
+                            failed_calculations += 1
+                            logger.warning(f"   ❌ {ticker}: Failed to calculate indicators")
+                    else:
+                        failed_calculations += 1
+                        logger.warning(f"   ❌ {ticker}: Insufficient data ({len(price_data) if price_data else 0} days)")
+                        
+                except Exception as e:
+                    failed_calculations += 1
+                    ticker_time = time.time() - ticker_start_time
+                    logger.error(f"   ❌ {ticker}: Error after {ticker_time:.2f}s - {e}")
+                    
+        except Exception as e:
+            logger.error(f"❌ Technical indicator processing failed: {e}")
+            
+        total_time = time.time() - start_time
+        logger.info(f"🎯 TECHNICAL INDICATORS COMPLETED: {successful_calculations}/{len(tickers)} successful in {total_time/60:.1f} minutes")
+        
+        return {
+            'successful_calculations': successful_calculations,
+            'failed_calculations': failed_calculations, 
+            'historical_fetches': historical_fetches,
+            'processing_time': total_time
+        }
+
+    def _calculate_daily_scores_with_progress(self) -> Dict:
+        """
+        PRIORITY 5: Calculate daily scores for all companies with detailed progress logging.
+        """
+        logger.info("🎯 STARTING DAILY SCORE CALCULATIONS")
+        start_time = time.time()
+        
+        try:
+            # Import scoring modules with enhanced debugging (keeping existing logic)
+            try:
+                import sys
+                import os
+                
+                # Debug current working directory and paths
+                current_dir = os.getcwd()
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                parent_dir = os.path.dirname(script_dir)
+                
+                logger.info(f"📁 Current working dir: {current_dir}")
+                logger.info(f"📁 Script directory: {script_dir}")
+                logger.info(f"📁 Parent directory: {parent_dir}")
+                
+                # Check if scoring files exist
+                fundamental_path = os.path.join(parent_dir, 'calc_fundamental_scores.py')
+                technical_path = os.path.join(parent_dir, 'calc_technical_scores_enhanced.py')
+                
+                logger.info(f"🔍 Checking fundamental scoring file: {fundamental_path}")
+                logger.info(f"   {'✅ EXISTS' if os.path.exists(fundamental_path) else '❌ MISSING'}")
+                
+                logger.info(f"🔍 Checking technical scoring file: {technical_path}")
+                logger.info(f"   {'✅ EXISTS' if os.path.exists(technical_path) else '❌ MISSING'}")
+                
+                # Add parent directory to path to find scoring modules
+                if parent_dir not in sys.path:
+                    sys.path.insert(0, parent_dir)
+                    logger.info(f"📦 Added to Python path: {parent_dir}")
+                
+                # Try importing with detailed error reporting
+                logger.info("🧪 Attempting to import FundamentalScoreCalculator...")
+                from calc_fundamental_scores import FundamentalScoreCalculator
+                logger.info("✅ FundamentalScoreCalculator imported successfully")
+                
+                logger.info("🧪 Attempting to import EnhancedTechnicalScoreCalculator...")
+                from calc_technical_scores_enhanced import EnhancedTechnicalScoreCalculator
+                logger.info("✅ EnhancedTechnicalScoreCalculator imported successfully")
+                
+                logger.info("🎉 All scoring modules imported successfully!")
+                
+            except ImportError as e:
+                logger.error(f"❌ Failed to import scoring modules: {e}")
+                return {
+                    'phase': 'priority_5_daily_scores',
+                    'status': 'failed',
+                    'error': f'Import error: {str(e)}',
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Initialize scoring calculators
+            logger.info("🔧 Initializing scoring calculators...")
+            fundamental_calc = FundamentalScoreCalculator()
+            technical_calc = EnhancedTechnicalScoreCalculator()
+            logger.info("✅ Scoring calculators initialized")
+            
+            # Get all active tickers that have both fundamental and technical data
+            logger.info("🔍 Finding tickers with complete data for scoring...")
+            tickers_with_data = self._get_tickers_with_complete_data()
+            logger.info(f"📊 Found {len(tickers_with_data)} tickers with complete data for scoring")
+            
+            if not tickers_with_data:
+                logger.warning("❌ No tickers with complete data found for scoring")
+                return {
+                    'phase': 'priority_5_daily_scores',
+                    'status': 'skipped',
+                    'reason': 'no_tickers_with_complete_data',
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Calculate scores for each ticker with progress tracking
+            successful_calculations = 0
+            failed_calculations = 0
+            
+            logger.info(f"🚀 STARTING SCORE CALCULATIONS for {len(tickers_with_data)} tickers")
+            
+            for i, ticker in enumerate(tickers_with_data, 1):
+                ticker_start_time = time.time()
+                
+                try:
+                    logger.info(f"📊 [{i}/{len(tickers_with_data)}] Calculating scores for {ticker}")
+                    
+                    # Calculate fundamental scores
+                    logger.debug(f"   📈 Calculating fundamental scores for {ticker}")
+                    fundamental_scores = fundamental_calc.calculate_fundamental_scores(ticker)
+                    
+                    # Calculate enhanced technical scores
+                    logger.debug(f"   📊 Calculating technical scores for {ticker}")
+                    technical_scores = technical_calc.calculate_enhanced_technical_scores(ticker)
+                    
+                    if fundamental_scores and technical_scores:
+                        # Store combined scores
+                        logger.debug(f"   💾 Storing combined scores for {ticker}")
+                        success = self._store_combined_scores(ticker, fundamental_scores, technical_scores)
+                        
+                        ticker_time = time.time() - ticker_start_time
+                        
+                        if success:
+                            successful_calculations += 1
+                            logger.info(f"   ✅ {ticker}: Scores calculated and stored in {ticker_time:.2f}s")
+                            
+                            # Progress update every 10 tickers
+                            if i % 10 == 0 or i == len(tickers_with_data):
+                                logger.info(f"📊 SCORING PROGRESS: {i}/{len(tickers_with_data)} completed ({i/len(tickers_with_data)*100:.1f}%)")
+                        else:
+                            failed_calculations += 1
+                            logger.warning(f"   ❌ {ticker}: Failed to store scores after {ticker_time:.2f}s")
+                    else:
+                        failed_calculations += 1
+                        ticker_time = time.time() - ticker_start_time
+                        logger.warning(f"   ❌ {ticker}: Failed to calculate scores after {ticker_time:.2f}s")
+                        
+                except Exception as e:
+                    failed_calculations += 1
+                    ticker_time = time.time() - ticker_start_time
+                    logger.error(f"   ❌ {ticker}: Error after {ticker_time:.2f}s - {e}")
+            
+            total_time = time.time() - start_time
+            logger.info(f"🎯 DAILY SCORES COMPLETED: {successful_calculations}/{len(tickers_with_data)} successful in {total_time/60:.1f} minutes")
+            
+            return {
+                'phase': 'priority_5_daily_scores',
+                'status': 'completed',
+                'total_tickers': len(tickers_with_data),
+                'successful_calculations': successful_calculations,
+                'failed_calculations': failed_calculations,
+                'processing_time': total_time
+            }
+            
+        except Exception as e:
+            total_time = time.time() - start_time
+            logger.error(f"❌ Daily scores calculation failed after {total_time:.2f}s: {e}")
+            return {
+                'phase': 'priority_5_daily_scores',
+                'status': 'failed',
+                'error': str(e),
+                'successful_calculations': 0,
+                'failed_calculations': 0,
+                'processing_time': total_time
+            }
+
     def _update_earnings_announcement_fundamentals(self) -> Dict:
         """
         PRIORITY 2: Update fundamental information for companies with earnings announcements that day.
         Calculate fundamental ratios based on updated stock prices.
         """
-        logger.info("PRIORITY 2: Processing earnings announcements and fundamental updates")
+        logger.info("📊 PRIORITY 2: Processing earnings announcements and fundamental updates")
         
         try:
             start_time = time.time()
