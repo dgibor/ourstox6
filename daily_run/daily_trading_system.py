@@ -416,12 +416,8 @@ class DailyTradingSystem:
                 import sys
                 import os
                 
-                # Check paths for the calculator
-                calc_paths = [
-                    os.path.join(os.getcwd(), 'utility_functions', 'comprehensive_technical_indicators_fix.py'),
-                    os.path.join(os.path.dirname(os.getcwd()), 'utility_functions', 'comprehensive_technical_indicators_fix.py'),
-                    '/app/utility_functions/comprehensive_technical_indicators_fix.py'
-                ]
+                # Universal calculator is available in the main directory
+                calc_paths = ['calc_technical_scores_universal.py']
                 
                 logger.info("🔍 Checking calculator paths:")
                 calculator_found = False
@@ -621,9 +617,9 @@ class DailyTradingSystem:
                 from calc_fundamental_scores import FundamentalScoreCalculator
                 logger.info("✅ FundamentalScoreCalculator imported successfully")
                 
-                logger.info("🧪 Attempting to import EnhancedTechnicalScoreCalculator...")
-                from calc_technical_scores_enhanced import EnhancedTechnicalScoreCalculator
-                logger.info("✅ EnhancedTechnicalScoreCalculator imported successfully")
+                logger.info("🧪 Attempting to import UniversalTechnicalScoreCalculator...")
+                from calc_technical_scores_universal import UniversalTechnicalScoreCalculator
+                logger.info("✅ UniversalTechnicalScoreCalculator imported successfully")
                 
                 logger.info("🎉 All scoring modules imported successfully!")
                 
@@ -641,7 +637,7 @@ class DailyTradingSystem:
             # Initialize scoring calculators
             logger.info("🔧 Initializing scoring calculators...")
             fundamental_calc = FundamentalScoreCalculator()
-            technical_calc = EnhancedTechnicalScoreCalculator()
+            technical_calc = UniversalTechnicalScoreCalculator()
             logger.info("✅ Scoring calculators initialized")
             
             # Get all active tickers that have both fundamental and technical data
@@ -1171,9 +1167,9 @@ class DailyTradingSystem:
                 from calc_fundamental_scores import FundamentalScoreCalculator
                 logger.info("✅ FundamentalScoreCalculator imported successfully")
                 
-                logger.info("🧪 Attempting to import EnhancedTechnicalScoreCalculator...")
-                from calc_technical_scores_enhanced import EnhancedTechnicalScoreCalculator
-                logger.info("✅ EnhancedTechnicalScoreCalculator imported successfully")
+                logger.info("🧪 Attempting to import UniversalTechnicalScoreCalculator...")
+                from calc_technical_scores_universal import UniversalTechnicalScoreCalculator
+                logger.info("✅ UniversalTechnicalScoreCalculator imported successfully")
                 
                 logger.info("🎉 All scoring modules imported successfully!")
                 
@@ -1221,7 +1217,7 @@ class DailyTradingSystem:
             
             # Initialize scoring calculators
             fundamental_calc = FundamentalScoreCalculator()
-            technical_calc = EnhancedTechnicalScoreCalculator()
+            technical_calc = UniversalTechnicalScoreCalculator()
             
             # Get all active tickers that have both fundamental and technical data
             tickers_with_data = self._get_tickers_with_complete_data()
@@ -1480,16 +1476,14 @@ class DailyTradingSystem:
         start_time = time.time()
         
         try:
-            # Import the comprehensive calculator
-            import sys
-            sys.path.append('utility_functions')
-            from comprehensive_technical_indicators_fix import ComprehensiveTechnicalCalculator
+            # Use the universal accuracy calculator
+            from calc_technical_scores_universal import UniversalTechnicalScoreCalculator
             
             # Create calculator instance
-            calculator = ComprehensiveTechnicalCalculator()
+            calculator = UniversalTechnicalScoreCalculator()
             
-            # Calculate all indicators
-            indicators = calculator.calculate_all_indicators(ticker, price_data)
+            # Calculate indicators using universal system
+            indicators = calculator.calculate_enhanced_technical_scores(ticker)
             
             calculation_time = time.time() - start_time
             
