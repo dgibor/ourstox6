@@ -472,22 +472,40 @@ class DatabaseManager:
                     continue
         
         if update_fields:
-            values.extend([ticker, target_date])
-            query = f"""
-            UPDATE daily_charts 
-            SET {', '.join(update_fields)}
-            WHERE ticker = %s AND date = %s
-            """
-            
+            # Use batch update for better performance (PostgreSQL optimized)
             try:
-                result = self.execute_update(query, tuple(values))
-                stored_count = len(update_fields)
+                stored_count = self._batch_update_indicators(ticker, target_date, update_fields, values)
                 self.logger.info(f"Updated {stored_count} technical indicators for {ticker}")
                 return stored_count
             except Exception as e:
                 self.logger.error(f"Failed to update technical indicators for {ticker}: {e}")
                 return 0
         return 0
+    
+    def _batch_update_indicators(self, ticker: str, target_date: str, fields: List[str], values: List[Any]) -> int:
+        """Optimized batch update for technical indicators"""
+        # Split into smaller chunks to avoid massive queries
+        chunk_size = 20  # Update 20 fields at a time
+        total_updated = 0
+        
+        for i in range(0, len(fields), chunk_size):
+            chunk_fields = fields[i:i + chunk_size]
+            chunk_values = values[i:i + chunk_size]
+            
+            # Build query for this chunk
+            chunk_values.extend([ticker, target_date])
+            query = f"""
+            UPDATE daily_charts 
+            SET {', '.join(chunk_fields)}
+            WHERE ticker = %s AND date = %s
+            """
+            
+            with self.get_cursor() as cursor:
+                cursor.execute(query, tuple(chunk_values))
+                if cursor.rowcount > 0:
+                    total_updated += len(chunk_fields)
+        
+        return total_updated
 
     def upsert_company_scores(self, ticker: str, score_data: Dict[str, Any]) -> bool:
         """

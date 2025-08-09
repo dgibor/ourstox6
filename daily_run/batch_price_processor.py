@@ -498,7 +498,7 @@ class BatchPriceProcessor:
             
             for ticker, data in price_data.items():
                 # Handle different field names from different services
-                close_val = data.get('close') or data.get('close_price')
+                close_val = data.get('close') or data.get('close_price') or data.get('price')
                 if close_val:
                     try:
                         close_val = float(close_val)
