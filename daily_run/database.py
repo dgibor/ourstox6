@@ -441,11 +441,35 @@ class DatabaseManager:
         
         for indicator, value in indicators.items():
             if indicator in indicator_columns and value is not None:
-                # Convert float to integer for database storage (multiply by 100 to preserve precision)
-                if isinstance(value, float):
-                    value = int(value * 100)
-                update_fields.append(f"{indicator_columns[indicator]} = %s")
-                values.append(value)
+                try:
+                    # Convert float to integer for database storage (multiply by 100 to preserve precision)
+                    if isinstance(value, float):
+                        # Validate the value range to prevent database overflow
+                        # Database precision 15, scale 4 means max value < 10^11
+                        # After multiplying by 100, max safe value is 10^9
+                        if abs(value) > 1e9:  # Cap at 1 billion to be safe
+                            self.logger.warning(f"Capping extreme indicator value for {ticker}.{indicator}: {value} -> 1e9")
+                            value = 1e9 if value > 0 else -1e9
+                        
+                        # Additional validation for common indicators
+                        if indicator in ['rsi_14'] and (value < 0 or value > 100):
+                            self.logger.warning(f"Invalid RSI value for {ticker}: {value}, setting to 50")
+                            value = 50
+                        elif indicator in ['adx_14', 'atr_14'] and value < 0:
+                            self.logger.warning(f"Invalid {indicator} value for {ticker}: {value}, setting to 0")
+                            value = 0
+                        elif indicator.startswith('bb_') and abs(value) > 1e6:  # Bollinger Bands should be reasonable
+                            self.logger.warning(f"Extreme Bollinger Band value for {ticker}.{indicator}: {value}")
+                            value = max(min(value, 1e6), -1e6)
+                        
+                        value = int(value * 100)
+                    
+                    update_fields.append(f"{indicator_columns[indicator]} = %s")
+                    values.append(value)
+                    
+                except (ValueError, OverflowError) as e:
+                    self.logger.error(f"Error processing indicator {indicator} for {ticker}: {e}")
+                    continue
         
         if update_fields:
             values.extend([ticker, target_date])
@@ -457,8 +481,9 @@ class DatabaseManager:
             
             try:
                 result = self.execute_update(query, tuple(values))
-                self.logger.info(f"Updated {len(update_fields)} technical indicators for {ticker}")
-                return result
+                stored_count = len(update_fields)
+                self.logger.info(f"Updated {stored_count} technical indicators for {ticker}")
+                return stored_count
             except Exception as e:
                 self.logger.error(f"Failed to update technical indicators for {ticker}: {e}")
                 return 0

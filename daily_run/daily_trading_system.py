@@ -530,13 +530,21 @@ class DailyTradingSystem:
                         
                         if indicators:
                             # Store indicators in database
-                            logger.debug(f"   💾 Storing {len(indicators)} indicators for {ticker}")
-                            self.db.update_technical_indicators(ticker, indicators)
+                            logger.info(f"   💾 Storing {len(indicators)} calculated indicators for {ticker}")
+                            stored_count = self.db.update_technical_indicators(ticker, indicators)
                             
                             ticker_time = time.time() - ticker_start_time
                             successful_calculations += 1
                             
-                            logger.info(f"   ✅ {ticker}: Completed {len(indicators)} indicators in {ticker_time:.2f}s")
+                            # Show calculation vs storage comparison
+                            if stored_count is None:
+                                stored_count = 0
+                                logger.error(f"   ❌ {ticker}: Failed to store indicators (database error)")
+                            elif stored_count != len(indicators):
+                                logger.warning(f"   ⚠️  {ticker}: Calculated {len(indicators)} indicators but stored {stored_count}")
+                                logger.info(f"   📋 Missing indicators likely due to: database column mismatch, invalid values, or unsupported indicator types")
+                            
+                            logger.info(f"   ✅ {ticker}: Calculated {len(indicators)}, stored {stored_count}, completed in {ticker_time:.2f}s")
                             
                             # ETA calculation
                             avg_time_per_ticker = (time.time() - start_time) / i

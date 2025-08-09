@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import os
 import collections
+import traceback
 
 from common_imports import *
 from database import DatabaseManager
