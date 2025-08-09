@@ -5,21 +5,30 @@ Increases column precision for OBV, VPT and related volume indicators
 """
 
 import os
+import sys
 import psycopg2
 from dotenv import load_dotenv
+
+# Add the daily_run module to the path
+sys.path.append('daily_run')
 
 def apply_migration():
     """Apply the volume column precision migration"""
     load_dotenv()
     
-    # Database connection
-    connection_params = {
-        'host': os.getenv('DATABASE_HOST'),
-        'port': os.getenv('DATABASE_PORT', 5432),
-        'database': os.getenv('DATABASE_NAME'),
-        'user': os.getenv('DATABASE_USER'),
-        'password': os.getenv('DATABASE_PASSWORD')
-    }
+    # Use the same database configuration as the existing system
+    try:
+        from daily_run.config import Config
+        connection_params = Config.get_db_config()
+    except ImportError:
+        # Fallback to environment variables
+        connection_params = {
+            'host': os.getenv('DB_HOST', 'localhost'),
+            'port': int(os.getenv('DB_PORT', 5432)),
+            'dbname': os.getenv('DB_NAME', 'ourstox'),
+            'user': os.getenv('DB_USER', 'postgres'),
+            'password': os.getenv('DB_PASSWORD', '')
+        }
     
     try:
         print("🔧 Connecting to database...")

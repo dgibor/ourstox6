@@ -459,8 +459,9 @@ class DatabaseManager:
                         # After multiplying by 100 for storage precision
                         
                         if indicator in ['obv', 'vpt', 'volume_confirmation', 'volume_weighted_high', 'volume_weighted_low']:
-                            # Volume indicators: NUMERIC(18,4) allows up to 1e10 after *100
-                            max_safe_value = 1e10
+                            # Volume indicators: NUMERIC(18,4) allows up to 1e12 after *100 (1 trillion)
+                            # This should handle even the largest volume accumulations
+                            max_safe_value = 1e12
                         else:
                             # Regular indicators: NUMERIC(15,4) allows up to 1e7 after *100  
                             max_safe_value = 1e7
