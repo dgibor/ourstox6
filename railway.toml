@@ -5,7 +5,7 @@ buildCommand = "pip install -r requirements.txt"
 [deploy]
 runtime = "V2"
 numReplicas = 1
-startCommand = "python railway_debug.py"
+startCommand = "python railway_startup.py"
 sleepApplication = true
 restartPolicyType = "NEVER"
 cronSchedule = "5 22 * * *"
@@ -15,6 +15,7 @@ cronSchedule = "5 22 * * *"
 PYTHONPATH = "/app:/app/daily_run"
 PYTHONUNBUFFERED = "1"
 TZ = "America/New_York"
+WORKDIR = "/app"
 
 # Original cron jobs (commented out for testing)
 # Primary cron job - 10:05 PM UTC (5:05 PM ET after market close)
