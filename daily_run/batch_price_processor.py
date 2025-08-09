@@ -456,17 +456,24 @@ class BatchPriceProcessor:
     
     def store_daily_prices(self, price_data: Dict[str, Dict]):
         """
-        Store daily prices in the daily_charts table.
+        Store daily prices in the daily_charts table using efficient batch insert.
         Args:
             price_data: Dictionary mapping ticker to price data
         """
         if not price_data:
             logger.warning("No price data to store")
             return
+            
         logger.info(f"Storing {len(price_data)} daily price records")
+        start_time = time.time()
+        
         try:
-            today = date.today()
-            successful_inserts = 0
+            today_str = date.today().strftime('%Y-%m-%d')
+            
+            # Prepare batch data for insertion
+            batch_values = []
+            successful_prep = 0
+            
             for ticker, data in price_data.items():
                 # Handle different field names from different services
                 close_val = data.get('close') or data.get('close_price')
@@ -478,37 +485,51 @@ class BatchPriceProcessor:
                         high_val = float(data.get('high', close_val))
                         low_val = float(data.get('low', close_val))
                         volume = data.get('volume', 0) or 0
-                        query = """
-                        INSERT INTO daily_charts (
-                            ticker, date, open, high, low, close, volume, created_at
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
-                        ON CONFLICT (ticker, date) 
-                        DO UPDATE SET
-                            open = EXCLUDED.open,
-                            high = EXCLUDED.high,
-                            low = EXCLUDED.low,
-                            close = EXCLUDED.close,
-                            volume = EXCLUDED.volume,
-                            created_at = NOW()
-                        """
-                        values = (
+                        
+                        batch_values.append((
                             ticker,
-                            today,
+                            today_str,  # Use string format to match VARCHAR column
                             open_val,
                             high_val,
                             low_val,
                             close_val,
                             volume
-                        )
-                        self.db.execute_update(query, values)
-                        successful_inserts += 1
+                        ))
+                        successful_prep += 1
                     except Exception as e:
-                        logger.error(f"Error storing price for {ticker}: {e}")
+                        logger.error(f"Error preparing price data for {ticker}: {e}")
                         continue
-            logger.info(f"Successfully stored {successful_inserts}/{len(price_data)} daily price records")
+            
+            if not batch_values:
+                logger.warning("No valid price data to store after preparation")
+                return
+            
+            logger.info(f"Prepared {successful_prep} records for batch insert")
+            
+            # Execute batch insert using executemany for efficiency
+            batch_query = """
+                INSERT INTO daily_charts (
+                    ticker, date, open, high, low, close, volume
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (ticker, date) 
+                DO UPDATE SET
+                    open = EXCLUDED.open,
+                    high = EXCLUDED.high,
+                    low = EXCLUDED.low,
+                    close = EXCLUDED.close,
+                    volume = EXCLUDED.volume
+            """
+            
+            # Use batch insert method from database manager
+            successful_inserts = self.db.execute_batch(batch_query, batch_values)
+            
+            processing_time = time.time() - start_time
+            logger.info(f"✅ Successfully stored {successful_inserts}/{len(price_data)} daily price records in {processing_time:.2f}s")
             self.monitoring.record_metric('daily_prices_stored', successful_inserts)
+            
         except Exception as e:
-            logger.error(f"Error storing daily prices: {e}")
+            processing_time = time.time() - start_time
+            logger.error(f"❌ Error storing daily prices after {processing_time:.2f}s: {e}")
             self.error_handler.handle_error(
                 "Failed to store daily prices", e, ErrorSeverity.HIGH
             )
