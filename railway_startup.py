@@ -78,10 +78,26 @@ def find_and_execute():
     logger.info(f"🚀 Executing {target_file}...")
     
     try:
-        # Import and run the main function
-        exec(open(target_file).read())
-        logger.info("✅ Script executed successfully")
-        return True
+        # Import the module properly
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("railway_cron_entry", target_file)
+        module = importlib.util.module_from_spec(spec)
+        
+        # Add module to sys.modules so imports work
+        sys.modules["railway_cron_entry"] = module
+        
+        # Execute the module
+        spec.loader.exec_module(module)
+        
+        # Call the main function if it exists
+        if hasattr(module, 'main'):
+            result = module.main()
+            logger.info(f"✅ Script executed successfully, result: {result}")
+            return result
+        else:
+            logger.info("✅ Script executed successfully (no main function)")
+            return True
+            
     except Exception as e:
         logger.error(f"❌ Error executing script: {e}")
         import traceback
