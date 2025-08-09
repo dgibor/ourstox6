@@ -159,9 +159,34 @@ class ComprehensiveTechnicalCalculator:
             # Remove rows with NaN values in price columns
             df = df.dropna(subset=['close'])
             
-            # Remove problematic price scaling logic
-            # Database prices should be consistent - don't modify them here
-            # Technical indicators work with any price scale as long as it's consistent
+            # Robust data cleaning to handle mixed scaling in database
+            # Detect and correct inconsistent price scaling
+            price_columns = ['open', 'high', 'low', 'close']
+            for col in price_columns:
+                if col in df.columns:
+                    # Detect large price jumps that indicate scaling changes
+                    if len(df) > 1:
+                        price_series = df[col].dropna()
+                        if len(price_series) > 1:
+                            # Calculate day-to-day ratios
+                            ratios = price_series.pct_change().abs()
+                            # If any single-day change > 50%, likely a scaling issue
+                            large_changes = ratios > 0.5
+                            if large_changes.any():
+                                self._fix_scaling_jumps(df, col)
+            
+            # Final scaling check: ensure prices are in reasonable ranges
+            # Database stores prices differently - some as dollars, some as cents
+            # Convert all to dollars for consistent calculations
+            for col in price_columns:
+                if col in df.columns:
+                    median_price = df[col].median()
+                    if median_price > 1000:  # If median > $1000, likely stored as cents
+                        logger.info(f"Converting {col} from cents to dollars (median={median_price:.0f})")
+                        df[col] = df[col] / 100.0
+            
+            # Remove extreme outlier days that corrupt technical indicators
+            df = self._remove_outlier_days(df)
             
             return df
             
@@ -169,15 +194,72 @@ class ComprehensiveTechnicalCalculator:
             logger.error(f"Error preparing price data: {e}")
             return None
     
+    def _fix_scaling_jumps(self, df: pd.DataFrame, col: str):
+        """Fix scaling jumps in price data - more aggressive cleaning"""
+        try:
+            price_series = df[col].copy()
+            ratios = price_series.pct_change().abs()
+            
+            # Detect even smaller scaling issues (10x instead of 50x)
+            large_changes = ratios > 0.3  # More sensitive threshold
+            
+            # Convert boolean index to integer positions
+            jump_positions = large_changes[large_changes].index
+            
+            for idx_pos in range(len(jump_positions)):
+                idx = jump_positions[idx_pos]
+                # Get integer position in the series
+                int_idx = price_series.index.get_loc(idx)
+                
+                if int_idx > 0:
+                    prev_price = price_series.iloc[int_idx-1]
+                    curr_price = price_series.iloc[int_idx]
+                    
+                    # More aggressive scaling detection
+                    if curr_price / prev_price > 10:  # 10x jump
+                        logger.warning(f"Detected large price jump at position {int_idx}: {prev_price:.2f} -> {curr_price:.2f}, correcting...")
+                        df.loc[idx:, col] = df.loc[idx:, col] / 100
+                    elif prev_price / curr_price > 10:  # 1/10x drop
+                        logger.warning(f"Detected large price drop at position {int_idx}: {prev_price:.2f} -> {curr_price:.2f}, correcting...")
+                        df.loc[idx:, col] = df.loc[idx:, col] * 100
+                    elif curr_price / prev_price > 5:  # 5x jump (more conservative)
+                        logger.warning(f"Detected medium price jump at position {int_idx}: {prev_price:.2f} -> {curr_price:.2f}")
+                        
+        except Exception as e:
+            logger.error(f"Error fixing scaling jumps: {e}")
+    
+    def _remove_outlier_days(self, df: pd.DataFrame):
+        """Remove days with extreme price movements that corrupt indicators"""
+        try:
+            if len(df) < 5:
+                return df
+                
+            # Calculate daily percentage changes
+            for col in ['close', 'high', 'low']:
+                if col in df.columns:
+                    pct_change = df[col].pct_change().abs()
+                    # Remove days with >200% price changes (clearly bad data)
+                    extreme_days = pct_change > 2.0
+                    if extreme_days.any():
+                        logger.warning(f"Removing {extreme_days.sum()} days with extreme {col} changes")
+                        df = df[~extreme_days]
+            
+            return df
+        except Exception as e:
+            logger.error(f"Error removing outliers: {e}")
+            return df
+    
     def _calculate_basic_indicators(self, df: pd.DataFrame, ticker: str) -> Dict:
         """Calculate basic technical indicators: RSI, EMA, MACD"""
         indicators = {}
         
         try:
-            # RSI
+            # RSI - Use only the most recent 14 days for current RSI
             if len(df) >= 14:
                 from indicators.rsi import calculate_rsi
-                rsi_result = calculate_rsi(df['close'])
+                # Get only the last 14 days for RSI calculation
+                recent_closes = df['close'].tail(14)
+                rsi_result = calculate_rsi(recent_closes)
                 if rsi_result is not None and len(rsi_result) > 0:
                     latest_rsi = rsi_result.iloc[-1]
                     if pd.notna(latest_rsi) and latest_rsi != 0:
@@ -360,13 +442,13 @@ class ComprehensiveTechnicalCalculator:
                         indicators['cci'] = float(latest_cci)
                         indicators['cci_20'] = float(latest_cci)  # Also store as cci_20
             
-            # ADX (Average Directional Index)
-            if len(df) >= 14:
-                from indicators.adx import calculate_adx
-                adx_result = calculate_adx(df['high'], df['low'], df['close'])
+            # ADX (Average Directional Index) - Use robust version
+            if len(df) >= 28:  # Need more data for robust ADX
+                from indicators.adx_robust import calculate_adx_robust
+                adx_result = calculate_adx_robust(df['high'], df['low'], df['close'])
                 if adx_result is not None and len(adx_result) > 0:
                     latest_adx = adx_result.iloc[-1]
-                    if pd.notna(latest_adx) and latest_adx != 0:
+                    if pd.notna(latest_adx):
                         indicators['adx_14'] = float(latest_adx)
             
             # ATR (Average True Range)

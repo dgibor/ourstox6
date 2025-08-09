@@ -72,15 +72,19 @@ def test_indicator_calculations():
                 else:
                     print(f"   ❌ ADX: {adx:.1f} (invalid - should be 0-100)")
             
-            # ATR should be positive and reasonable
+            # ATR should be positive and reasonable (relative to price)
             if 'atr_14' in indicators:
                 atr = indicators['atr_14']
                 total_checks += 1
-                if atr > 0 and atr < 100:  # Reasonable for most stocks
-                    print(f"   ✅ ATR: {atr:.2f} (positive and reasonable)")
+                current_price = float([row['close'] for row in price_data][-1])
+                if current_price > 1000:
+                    current_price = current_price / 100.0  # Convert if needed
+                expected_max_atr = current_price * 0.2  # ATR shouldn't exceed 20% of price
+                if atr > 0 and atr < expected_max_atr:
+                    print(f"   ✅ ATR: {atr:.2f} (positive and reasonable vs price ${current_price:.2f})")
                     checks_passed += 1
                 else:
-                    print(f"   ❌ ATR: {atr:.2f} (should be positive and < 100)")
+                    print(f"   ❌ ATR: {atr:.2f} (should be positive and < {expected_max_atr:.2f})")
             
             # MACD should be reasonable relative to price
             if 'macd_line' in indicators:
