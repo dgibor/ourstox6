@@ -533,14 +533,18 @@ class DailyTradingSystem:
                             successful_calculations += 1
                             
                             # Show calculation vs storage comparison
+                            # Exclude metadata fields for accurate comparison
+                            metadata_fields = {'current_price', 'calculation_timestamp', 'data_source'}
+                            actual_indicators_count = len(set(indicators.keys()) - metadata_fields)
+                            
                             if stored_count is None:
                                 stored_count = 0
                                 logger.error(f"   ❌ {ticker}: Failed to store indicators (database error)")
-                            elif stored_count != len(indicators):
-                                logger.warning(f"   ⚠️  {ticker}: Calculated {len(indicators)} indicators but stored {stored_count}")
+                            elif stored_count != actual_indicators_count:
+                                logger.warning(f"   ⚠️  {ticker}: Calculated {actual_indicators_count} technical indicators but stored {stored_count}")
                                 logger.info(f"   📋 Missing indicators likely due to: database column mismatch, invalid values, or unsupported indicator types")
                             
-                            logger.info(f"   ✅ {ticker}: Calculated {len(indicators)}, stored {stored_count}, completed in {ticker_time:.2f}s")
+                            logger.info(f"   ✅ {ticker}: Calculated {actual_indicators_count}, stored {stored_count}, completed in {ticker_time:.2f}s")
                             
                             # ETA calculation
                             avg_time_per_ticker = (time.time() - start_time) / i

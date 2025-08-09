@@ -442,14 +442,18 @@ class DatabaseManager:
         }
         
         # Debug logging to identify missing indicators
-        # Exclude metadata fields that aren't indicators
+        # Exclude metadata fields that aren't technical indicators
         metadata_fields = {'current_price', 'calculation_timestamp', 'data_source'}
         calculated_indicators = set(indicators.keys()) - metadata_fields
         mapped_indicators = set(indicator_columns.keys())
         missing_mappings = calculated_indicators - mapped_indicators
         
+        # Only log if there are actual unmapped technical indicators
         if missing_mappings:
-            self.logger.debug(f"Indicators calculated but not mapped to database columns for {ticker}: {missing_mappings}")
+            self.logger.debug(f"Technical indicators calculated but not mapped to database columns for {ticker}: {missing_mappings}")
+        
+        # Count only actual technical indicators for accurate reporting
+        actual_indicators_count = len(calculated_indicators)
         
         for indicator, value in indicators.items():
             if indicator in indicator_columns and value is not None:
