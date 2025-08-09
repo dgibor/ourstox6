@@ -159,16 +159,9 @@ class ComprehensiveTechnicalCalculator:
             # Remove rows with NaN values in price columns
             df = df.dropna(subset=['close'])
             
-            # Convert prices from cents to dollars if needed
-            price_columns = ['open', 'high', 'low', 'close']
-            for col in price_columns:
-                if col in df.columns:
-                    try:
-                        median_val = df[col].dropna().median()
-                        if median_val and median_val > 1000:
-                            df[col] = df[col] / 100.0
-                    except Exception:
-                        continue
+            # Remove problematic price scaling logic
+            # Database prices should be consistent - don't modify them here
+            # Technical indicators work with any price scale as long as it's consistent
             
             return df
             
