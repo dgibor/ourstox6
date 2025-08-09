@@ -827,23 +827,84 @@ class DailyTradingSystem:
         try:
             start_time = time.time()
             
-            # Import scoring modules
+            # Import scoring modules with enhanced debugging
             try:
                 import sys
                 import os
-                # Add parent directory to path to find scoring modules
-                parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                if parent_dir not in sys.path:
-                    sys.path.append(parent_dir)
                 
+                # Debug current working directory and paths
+                current_dir = os.getcwd()
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                parent_dir = os.path.dirname(script_dir)
+                
+                logger.info(f"📁 Current working dir: {current_dir}")
+                logger.info(f"📁 Script directory: {script_dir}")
+                logger.info(f"📁 Parent directory: {parent_dir}")
+                logger.info(f"🐍 Python path: {sys.path[:3]}...")  # Show first 3 entries
+                
+                # Check if scoring files exist
+                fundamental_path = os.path.join(parent_dir, 'calc_fundamental_scores.py')
+                technical_path = os.path.join(parent_dir, 'calc_technical_scores_enhanced.py')
+                
+                logger.info(f"🔍 Checking fundamental scoring file: {fundamental_path}")
+                logger.info(f"   {'✅ EXISTS' if os.path.exists(fundamental_path) else '❌ MISSING'}")
+                
+                logger.info(f"🔍 Checking technical scoring file: {technical_path}")
+                logger.info(f"   {'✅ EXISTS' if os.path.exists(technical_path) else '❌ MISSING'}")
+                
+                # Add parent directory to path to find scoring modules
+                if parent_dir not in sys.path:
+                    sys.path.insert(0, parent_dir)  # Insert at beginning for higher priority
+                    logger.info(f"📦 Added to Python path: {parent_dir}")
+                
+                # Try importing with detailed error reporting
+                logger.info("🧪 Attempting to import FundamentalScoreCalculator...")
                 from calc_fundamental_scores import FundamentalScoreCalculator
+                logger.info("✅ FundamentalScoreCalculator imported successfully")
+                
+                logger.info("🧪 Attempting to import EnhancedTechnicalScoreCalculator...")
                 from calc_technical_scores_enhanced import EnhancedTechnicalScoreCalculator
-                logger.info("Successfully imported scoring modules")
+                logger.info("✅ EnhancedTechnicalScoreCalculator imported successfully")
+                
+                logger.info("🎉 All scoring modules imported successfully!")
+                
             except ImportError as e:
-                logger.error(f"Failed to import scoring modules: {e}")
+                logger.error(f"❌ Failed to import scoring modules: {e}")
+                logger.error(f"📁 Current working directory: {os.getcwd()}")
+                logger.error(f"🐍 Full Python path: {sys.path}")
+                
+                # Check if files exist in different locations
+                possible_locations = [
+                    os.path.join(os.getcwd(), 'calc_fundamental_scores.py'),
+                    os.path.join(parent_dir, 'calc_fundamental_scores.py'),
+                    '/app/calc_fundamental_scores.py'
+                ]
+                
+                logger.error("🔍 Checking possible file locations:")
+                for location in possible_locations:
+                    exists = os.path.exists(location)
+                    logger.error(f"   {location}: {'EXISTS' if exists else 'MISSING'}")
+                
                 return {
                     'phase': 'priority_5_daily_scores',
+                    'status': 'failed',
                     'error': f'Import error: {str(e)}',
+                    'debug_info': {
+                        'current_dir': os.getcwd(),
+                        'script_dir': script_dir,
+                        'parent_dir': parent_dir,
+                        'python_path': sys.path[:5]  # First 5 entries
+                    },
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': time.time() - start_time
+                }
+            except Exception as e:
+                logger.error(f"❌ Unexpected error during scoring module import: {e}")
+                return {
+                    'phase': 'priority_5_daily_scores',
+                    'status': 'failed',
+                    'error': f'Unexpected error: {str(e)}',
                     'successful_calculations': 0,
                     'failed_calculations': 0,
                     'processing_time': time.time() - start_time
