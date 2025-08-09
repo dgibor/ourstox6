@@ -112,7 +112,8 @@ class DatabaseManager:
             return 0
             
         with self.get_cursor() as cursor:
-            psycopg2.extras.execute_batch(cursor, query, params_list)
+            # Use page_size for better performance with large batches
+            psycopg2.extras.execute_batch(cursor, query, params_list, page_size=100)
             return cursor.rowcount
     
     def execute_values(self, query: str, params_list: List[tuple]) -> int:
@@ -446,10 +447,11 @@ class DatabaseManager:
                     if isinstance(value, float):
                         # Validate the value range to prevent database overflow
                         # Database precision 15, scale 4 means max value < 10^11
-                        # After multiplying by 100, max safe value is 10^9
-                        if abs(value) > 1e9:  # Cap at 1 billion to be safe
-                            self.logger.warning(f"Capping extreme indicator value for {ticker}.{indicator}: {value} -> 1e9")
-                            value = 1e9 if value > 0 else -1e9
+                        # After multiplying by 100, max safe value is 10^9 (1e9 * 100 = 1e11)
+                        # So we need to cap at 1e7 to be safe after *100
+                        if abs(value) > 1e7:  # Cap at 10 million to be safe after *100
+                            self.logger.warning(f"Capping extreme indicator value for {ticker}.{indicator}: {value} -> 1e7")
+                            value = 1e7 if value > 0 else -1e7
                         
                         # Additional validation for common indicators
                         if indicator in ['rsi_14'] and (value < 0 or value > 100):
@@ -490,7 +492,7 @@ class DatabaseManager:
         
         for i in range(0, len(fields), chunk_size):
             chunk_fields = fields[i:i + chunk_size]
-            chunk_values = values[i:i + chunk_size]
+            chunk_values = values[i:i + chunk_size].copy()  # Make a copy to avoid corrupting original
             
             # Build query for this chunk
             chunk_values.extend([ticker, target_date])
