@@ -14,8 +14,14 @@ import requests
 from dataclasses import dataclass
 import numpy as np
 
-from .database import DatabaseManager
-from .error_handler import ErrorHandler
+try:
+    from .database import DatabaseManager
+except ImportError:
+    from database import DatabaseManager
+try:
+    from .error_handler import ErrorHandler
+except ImportError:
+    from error_handler import ErrorHandler
 
 logger = logging.getLogger(__name__)
 

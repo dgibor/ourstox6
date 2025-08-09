@@ -8,8 +8,12 @@ import psycopg2.extras
 import logging
 from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
-from .config import Config
-from .exceptions import DatabaseError
+try:
+    from .config import Config
+    from .exceptions import DatabaseError
+except ImportError:
+    from config import Config
+    from exceptions import DatabaseError
 from datetime import date
 
 class DatabaseManager:

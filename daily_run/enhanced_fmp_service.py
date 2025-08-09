@@ -11,7 +11,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 import psycopg2
 from typing import Dict, Optional, List, Any
-from .database import DatabaseManager
+try:
+    from .database import DatabaseManager
+except ImportError:
+    from database import DatabaseManager
 
 # API configuration
 FMP_API_KEY = os.getenv('FMP_API_KEY')

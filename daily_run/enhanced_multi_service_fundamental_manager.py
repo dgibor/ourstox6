@@ -18,10 +18,22 @@ from dataclasses import dataclass
 from datetime import datetime
 
 # Import all services
-from .enhanced_fmp_service import EnhancedFMPService
-from .alpha_vantage_service import AlphaVantageService
-from .yahoo_finance_service import YahooFinanceService
-from .finnhub_service import FinnhubService
+try:
+    from .enhanced_fmp_service import EnhancedFMPService
+except ImportError:
+    from enhanced_fmp_service import EnhancedFMPService
+try:
+    from .alpha_vantage_service import AlphaVantageService
+except ImportError:
+    from alpha_vantage_service import AlphaVantageService
+try:
+    from .yahoo_finance_service import YahooFinanceService
+except ImportError:
+    from yahoo_finance_service import YahooFinanceService
+try:
+    from .finnhub_service import FinnhubService
+except ImportError:
+    from finnhub_service import FinnhubService
 
 logger = logging.getLogger(__name__)
 

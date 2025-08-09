@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
-from .ema import calculate_ema
+try:
+    from .ema import calculate_ema
+except ImportError:
+    from ema import calculate_ema
 
 def calculate_macd(prices: pd.Series, fast_period: int = 12, slow_period: int = 26, signal_period: int = 9) -> tuple:
     """

@@ -30,13 +30,22 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime, date, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from common_imports import *
-from database import DatabaseManager
-from error_handler import ErrorHandler, ErrorSeverity
-from monitoring import SystemMonitor
-from batch_price_processor import BatchPriceProcessor
-from earnings_based_fundamental_processor import EarningsBasedFundamentalProcessor
-from enhanced_multi_service_manager import get_multi_service_manager
+try:
+    from .common_imports import *
+    from .database import DatabaseManager
+    from .error_handler import ErrorHandler, ErrorSeverity
+    from .monitoring import SystemMonitor
+    from .batch_price_processor import BatchPriceProcessor
+    from .earnings_based_fundamental_processor import EarningsBasedFundamentalProcessor
+    from .enhanced_multi_service_manager import get_multi_service_manager
+except ImportError:
+    from common_imports import *
+    from database import DatabaseManager
+    from error_handler import ErrorHandler, ErrorSeverity
+    from monitoring import SystemMonitor
+    from batch_price_processor import BatchPriceProcessor
+    from earnings_based_fundamental_processor import EarningsBasedFundamentalProcessor
+    from enhanced_multi_service_manager import get_multi_service_manager
 try:
     from check_market_schedule import check_market_open_today, should_run_daily_process
 except ImportError:
