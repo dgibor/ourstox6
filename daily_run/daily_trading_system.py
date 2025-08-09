@@ -247,16 +247,34 @@ class DailyTradingSystem:
     def _get_tickers_needing_price_updates(self) -> List[str]:
         """Get tickers that don't have today's price data"""
         try:
+            today_str = date.today().strftime('%Y-%m-%d')
+            logger.info(f"🔍 Checking for tickers missing price data for: {today_str}")
+            
             query = """
             SELECT s.ticker 
             FROM stocks s
             LEFT JOIN daily_charts dc ON s.ticker = dc.ticker 
-                AND dc.date = CURRENT_DATE::date
+                AND dc.date = CURRENT_DATE::text
             WHERE s.ticker IS NOT NULL
                 AND dc.ticker IS NULL
             """
             results = self.db.execute_query(query)
-            return [row[0] for row in results]
+            tickers_needing_updates = [row[0] for row in results]
+            
+            logger.info(f"📊 Found {len(tickers_needing_updates)} tickers needing price updates")
+            
+            # Also check how many already have today's data
+            check_query = """
+            SELECT COUNT(DISTINCT ticker) as existing_count
+            FROM daily_charts 
+            WHERE date = CURRENT_DATE::text
+            """
+            existing_results = self.db.execute_query(check_query)
+            existing_count = existing_results[0][0] if existing_results else 0
+            logger.info(f"📊 Found {existing_count} tickers already have today's price data")
+            
+            return tickers_needing_updates
+            
         except Exception as e:
             logger.error(f"Error getting tickers needing price updates: {e}")
             # Fallback to all active tickers if query fails
