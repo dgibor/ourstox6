@@ -320,6 +320,7 @@ class BatchPriceProcessor:
                     response = requests.get(url, params=params)
                     response.raise_for_status()
                     data = response.json()
+                    logger.info(f"[ALPHA VANTAGE DEBUG] Raw API response for {ticker}: {data}")
                     
                     # Parse individual response
                     if 'Global Quote' in data:
