@@ -366,7 +366,8 @@ class DatabaseManager:
             
             # Additional Indicators
             'atr_14': 'atr_14',
-            'cci_20': 'cci_20',
+            'cci_14': 'cci_20',  # Universal calculator uses cci_14, map to cci_20 column
+            'cci_20': 'cci_20',  # Keep legacy mapping for compatibility
             'adx_14': 'adx_14',
             'vwap': 'vwap',
             'williams_r': 'williams_r',
@@ -441,12 +442,14 @@ class DatabaseManager:
         }
         
         # Debug logging to identify missing indicators
-        calculated_indicators = set(indicators.keys())
+        # Exclude metadata fields that aren't indicators
+        metadata_fields = {'current_price', 'calculation_timestamp', 'data_source'}
+        calculated_indicators = set(indicators.keys()) - metadata_fields
         mapped_indicators = set(indicator_columns.keys())
         missing_mappings = calculated_indicators - mapped_indicators
         
         if missing_mappings:
-            self.logger.warning(f"Indicators calculated but not mapped to database columns for {ticker}: {missing_mappings}")
+            self.logger.debug(f"Indicators calculated but not mapped to database columns for {ticker}: {missing_mappings}")
         
         for indicator, value in indicators.items():
             if indicator in indicator_columns and value is not None:

@@ -1483,11 +1483,14 @@ class DailyTradingSystem:
             calculator = UniversalTechnicalScoreCalculator()
             
             # Calculate indicators using universal system
-            indicators = calculator.calculate_enhanced_technical_scores(ticker)
+            results = calculator.calculate_enhanced_technical_scores(ticker)
             
             calculation_time = time.time() - start_time
             
-            if indicators:
+            if results and 'indicators' in results:
+                # Extract just the indicators for database storage
+                indicators = results['indicators']
+                
                 logger.info(f"Calculated {len(indicators)} technical indicators for {ticker} in {calculation_time:.2f}s")
                 
                 # Monitor performance and alert on slow calculations
