@@ -206,7 +206,7 @@ def calculate_volume_weighted_levels(high: pd.Series, low: pd.Series, close: pd.
         typical_price = (high + low + close) / 3
         
         # Handle NaN values with forward fill
-        typical_price = typical_price.fillna(method='ffill').fillna(method='bfill')
+        typical_price = typical_price.ffill().bfill()
         volume = volume.fillna(0)
         
         # Calculate VWAP with enhanced zero volume handling
@@ -309,7 +309,7 @@ def calculate_dynamic_support_resistance(high: pd.Series, low: pd.Series, close:
         price_std = close.rolling(window=window).std()
         
         # Handle NaN values with forward fill and backward fill
-        price_mean = price_mean.fillna(method='ffill').fillna(method='bfill')
+        price_mean = price_mean.ffill().bfill()
         price_std = price_std.fillna(0)
         
         # Ensure price_std is not zero to avoid division issues
@@ -416,7 +416,7 @@ def calculate_support_resistance_strength_enhanced(high: pd.Series, low: pd.Seri
             current_avg_volume = volume.iloc[i-window:i].mean()
             volume_bonus = min(2, avg_volume / current_avg_volume) if current_avg_volume > 0 else 0
             
-            support_strength.iloc[i] = min(10, base_strength + volume_bonus)
+            support_strength.iloc[i] = int(min(10, base_strength + volume_bonus))
             volume_confirmation.iloc[i] = 1 if volume_bonus > 1.5 else 0
         
         # Calculate resistance strength with volume confirmation
@@ -445,7 +445,7 @@ def calculate_support_resistance_strength_enhanced(high: pd.Series, low: pd.Seri
             current_avg_volume = volume.iloc[i-window:i].mean()
             volume_bonus = min(2, avg_volume / current_avg_volume) if current_avg_volume > 0 else 0
             
-            resistance_strength.iloc[i] = min(10, base_strength + volume_bonus)
+            resistance_strength.iloc[i] = int(min(10, base_strength + volume_bonus))
             volume_confirmation.iloc[i] = 1 if volume_bonus > 1.5 else 0
     
     return support_strength, resistance_strength, volume_confirmation

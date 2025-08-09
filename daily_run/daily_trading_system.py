@@ -1748,6 +1748,56 @@ class DailyTradingSystem:
             logger.error(f"Error getting active tickers: {e}")
             return []
 
+    def _get_priority_tickers_for_technicals(self, all_tickers: List[str], limit: int = 200) -> List[str]:
+        """
+        Get priority tickers for technical analysis - focuses on most important stocks.
+        Prioritizes by market cap, trading volume, and recent price updates.
+        """
+        try:
+            logger.info(f"Selecting {limit} priority tickers from {len(all_tickers)} total for technical analysis")
+            
+            # Get tickers with market cap data and recent prices, ordered by importance
+            query = """
+            SELECT DISTINCT s.ticker, s.market_cap, s.sector
+            FROM stocks s
+            INNER JOIN daily_charts dc ON s.ticker = dc.ticker
+            WHERE dc.date = CURRENT_DATE::text
+            AND s.market_cap IS NOT NULL 
+            AND s.market_cap > 1000000000  -- Focus on stocks > $1B market cap
+            ORDER BY s.market_cap DESC, s.ticker
+            LIMIT %s
+            """
+            
+            results = self.db.execute_query(query, (limit,))
+            priority_tickers = [row[0] for row in results]
+            
+            if len(priority_tickers) < limit:
+                # If we don't have enough large-cap stocks, add others with recent prices
+                remaining_needed = limit - len(priority_tickers)
+                logger.info(f"Found {len(priority_tickers)} large-cap stocks, adding {remaining_needed} more with recent prices")
+                
+                excluded_tickers = "'" + "','".join(priority_tickers) + "'" if priority_tickers else "''"
+                fallback_query = f"""
+                SELECT DISTINCT s.ticker
+                FROM stocks s
+                INNER JOIN daily_charts dc ON s.ticker = dc.ticker
+                WHERE dc.date = CURRENT_DATE::text
+                AND s.ticker NOT IN ({excluded_tickers})
+                ORDER BY s.ticker
+                LIMIT %s
+                """
+                
+                fallback_results = self.db.execute_query(fallback_query, (remaining_needed,))
+                priority_tickers.extend([row[0] for row in fallback_results])
+            
+            logger.info(f"Selected {len(priority_tickers)} priority tickers for technical analysis")
+            return priority_tickers
+            
+        except Exception as e:
+            logger.error(f"Error getting priority tickers: {e}")
+            # Fallback to first N tickers if query fails
+            return all_tickers[:limit] if all_tickers else []
+
     def _get_tickers_with_recent_prices(self) -> List[str]:
         """Get tickers that have recent price data."""
         try:
