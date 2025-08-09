@@ -454,12 +454,20 @@ class DatabaseManager:
                     # Convert float to integer for database storage (multiply by 100 to preserve precision)
                     if isinstance(value, float):
                         # Validate the value range to prevent database overflow
-                        # Database precision 15, scale 4 means max value < 10^11
-                        # After multiplying by 100, max safe value is 10^9 (1e9 * 100 = 1e11)
-                        # So we need to cap at 1e7 to be safe after *100
-                        if abs(value) > 1e7:  # Cap at 10 million to be safe after *100
-                            self.logger.warning(f"Capping extreme indicator value for {ticker}.{indicator}: {value} -> 1e7")
-                            value = 1e7 if value > 0 else -1e7
+                        # Volume indicators (OBV, VPT) use NUMERIC(18,4) = max value < 10^14
+                        # Other indicators use NUMERIC(15,4) = max value < 10^11
+                        # After multiplying by 100 for storage precision
+                        
+                        if indicator in ['obv', 'vpt', 'volume_confirmation', 'volume_weighted_high', 'volume_weighted_low']:
+                            # Volume indicators: NUMERIC(18,4) allows up to 1e10 after *100
+                            max_safe_value = 1e10
+                        else:
+                            # Regular indicators: NUMERIC(15,4) allows up to 1e7 after *100  
+                            max_safe_value = 1e7
+                            
+                        if abs(value) > max_safe_value:
+                            self.logger.warning(f"Capping extreme indicator value for {ticker}.{indicator}: {value} -> {max_safe_value}")
+                            value = max_safe_value if value > 0 else -max_safe_value
                         
                         # Additional validation for common indicators
                         if indicator in ['rsi_14'] and (value < 0 or value > 100):
