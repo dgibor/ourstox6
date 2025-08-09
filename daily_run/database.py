@@ -440,6 +440,14 @@ class DatabaseManager:
             'vpt': 'vpt'
         }
         
+        # Debug logging to identify missing indicators
+        calculated_indicators = set(indicators.keys())
+        mapped_indicators = set(indicator_columns.keys())
+        missing_mappings = calculated_indicators - mapped_indicators
+        
+        if missing_mappings:
+            self.logger.warning(f"Indicators calculated but not mapped to database columns for {ticker}: {missing_mappings}")
+        
         for indicator, value in indicators.items():
             if indicator in indicator_columns and value is not None:
                 try:
