@@ -10,6 +10,7 @@ import json
 import logging
 import time
 import math
+import warnings
 import pandas as pd
 import numpy as np
 from datetime import datetime, date
@@ -133,12 +134,41 @@ class UniversalTechnicalScoreCalculator:
                     continue
                     
                 try:
-                    # Use clustering to detect two distinct price groups
-                    kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
-                    clusters = kmeans.fit_predict(values.reshape(-1, 1))
+                    # Check if values have sufficient variation for clustering
+                    unique_values = np.unique(values)
+                    if len(unique_values) < 2:
+                        continue  # Skip if all values are identical
                     
-                    cluster_0_mean = np.mean(values[clusters == 0])
-                    cluster_1_mean = np.mean(values[clusters == 1])
+                    # Check if there's meaningful price variation (>5% spread)
+                    price_range = np.max(values) - np.min(values)
+                    if price_range / np.mean(values) < 0.05:
+                        continue  # Skip if prices are too similar
+                    
+                    # Use clustering to detect two distinct price groups
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=UserWarning)
+                        warnings.filterwarnings("ignore", category=RuntimeWarning)
+                        warnings.filterwarnings("ignore", message="Number of distinct clusters")
+                        kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
+                        clusters = kmeans.fit_predict(values.reshape(-1, 1))
+                    
+                    # Validate that we actually got two clusters
+                    if len(np.unique(clusters)) < 2:
+                        continue
+                    
+                    cluster_0_indices = clusters == 0
+                    cluster_1_indices = clusters == 1
+                    
+                    # Ensure both clusters have data
+                    if not np.any(cluster_0_indices) or not np.any(cluster_1_indices):
+                        continue
+                    
+                    cluster_0_mean = np.mean(values[cluster_0_indices])
+                    cluster_1_mean = np.mean(values[cluster_1_indices])
+                    
+                    # Validate means are valid numbers
+                    if np.isnan(cluster_0_mean) or np.isnan(cluster_1_mean) or cluster_0_mean == 0 or cluster_1_mean == 0:
+                        continue
                     
                     ratio = max(cluster_0_mean, cluster_1_mean) / min(cluster_0_mean, cluster_1_mean)
                     
@@ -157,7 +187,9 @@ class UniversalTechnicalScoreCalculator:
                                 df_fixed.loc[clusters == 1, col] = df_fixed.loc[clusters == 1, col] / 100
                             scaling_detected = True
                             break
-                except:
+                except Exception as e:
+                    # Log specific clustering errors for debugging if needed
+                    # logger.debug(f"Clustering failed for {ticker}.{col}: {e}")
                     continue
         
         if scaling_detected:
