@@ -289,7 +289,7 @@ class BatchPriceProcessor:
             time.sleep(1)
             
             logger.info(f"[YAHOO DEBUG] Requesting batch quotes for: {tickers}")
-            results = self.yahoo_service.get_batch_prices(tickers)
+            results = self.yahoo_service.get_batch_data(tickers, 'pricing')
             logger.info(f"[YAHOO DEBUG] Raw response: {str(results)[:500]}")
             if not results:
                 logger.warning(f"[YAHOO DEBUG] No results returned for tickers: {tickers}")
@@ -305,18 +305,39 @@ class BatchPriceProcessor:
             if not self.alpha_vantage_service:
                 logger.warning("Alpha Vantage service not available, skipping batch")
                 return {}
-            symbols = ','.join(tickers)
-            url = f"{self.alpha_vantage_service.base_url}/query"
-            params = {
-                'function': 'BATCH_STOCK_QUOTES',
-                'symbols': symbols,
-                'apikey': self.alpha_vantage_service.api_key
-            }
-            logger.info(f"[ALPHA VANTAGE DEBUG] Requesting: {url} with params: {params}")
-            response = requests.get(url, params=params)
-            logger.info(f"[ALPHA VANTAGE DEBUG] Status: {response.status_code}, Response: {str(response.text)[:500]}")
-            response.raise_for_status()
-            return self._parse_alpha_vantage_batch_response(response.json(), tickers)
+            
+            # Alpha Vantage doesn't support batch quotes, so process one at a time
+            results = {}
+            for ticker in tickers:
+                try:
+                    url = f"{self.alpha_vantage_service.base_url}/query"
+                    params = {
+                        'function': 'GLOBAL_QUOTE',
+                        'symbol': ticker,
+                        'apikey': self.alpha_vantage_service.api_key
+                    }
+                    logger.info(f"[ALPHA VANTAGE DEBUG] Requesting single quote for {ticker}")
+                    response = requests.get(url, params=params)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    # Parse individual response
+                    if 'Global Quote' in data:
+                        quote = data['Global Quote']
+                        results[ticker] = {
+                            'price': float(quote.get('05. price', 0)),
+                            'volume': int(quote.get('06. volume', 0)),
+                            'change': float(quote.get('09. change', 0)),
+                            'change_percent': quote.get('10. change percent', '').replace('%', ''),
+                            'data_source': 'alpha_vantage'
+                        }
+                    time.sleep(0.2)  # Rate limiting
+                except Exception as e:
+                    logger.error(f"[ALPHA VANTAGE DEBUG] Error for {ticker}: {e}")
+                    continue
+            
+            logger.info(f"[ALPHA VANTAGE DEBUG] Collected {len(results)} results")
+            return results
         except Exception as e:
             logger.error(f"Alpha Vantage batch request failed: {e}")
             import traceback
