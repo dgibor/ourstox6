@@ -1,0 +1,9 @@
+sector,fundamental_weight,technical_weight,vwap_sr_weight,market_sentiment_weight,base_score_fundamental,base_score_technical,rating_threshold_strong_buy,rating_threshold_buy,rating_threshold_hold,rating_threshold_weak_hold
+Technology,0.35,0.30,0.25,0.10,50,45,75,65,55,45
+Healthcare,0.40,0.20,0.25,0.15,55,40,78,68,58,48
+Financial,0.45,0.15,0.25,0.15,60,35,80,70,60,50
+Energy,0.30,0.25,0.30,0.15,45,40,72,62,52,42
+Consumer,0.35,0.25,0.25,0.15,50,40,75,65,55,45
+Industrial,0.40,0.20,0.25,0.15,55,35,78,68,58,48
+Communication Services,0.35,0.25,0.25,0.15,50,40,75,65,55,45
+Default,0.35,0.25,0.25,0.15,50,40,75,65,55,45

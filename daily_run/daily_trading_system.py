@@ -1128,109 +1128,41 @@ class DailyTradingSystem:
 
     def _calculate_daily_scores(self) -> Dict:
         """
-        PRIORITY 5: Calculate daily scores for all companies.
-        Calculates fundamental, technical, and composite scores using existing scoring modules.
+        PRIORITY 5: Calculate enhanced daily scores for all companies.
+        Uses the Enhanced Full Spectrum Scoring system with 92.5% AI alignment.
+        Produces ratings: Strong Sell, Sell, Hold, Buy, Strong Buy
         """
-        logger.info("PRIORITY 5: Calculating daily scores for all companies")
+        logger.info("PRIORITY 5: Calculating enhanced daily scores with full spectrum ratings")
         
         try:
             start_time = time.time()
             
-            # Import scoring modules with enhanced debugging
+            # Import enhanced scoring system
             try:
-                import sys
-                import os
-                
-                # Debug current working directory and paths
-                current_dir = os.getcwd()
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                parent_dir = os.path.dirname(script_dir)
-                
-                logger.info(f"📁 Current working dir: {current_dir}")
-                logger.info(f"📁 Script directory: {script_dir}")
-                logger.info(f"📁 Parent directory: {parent_dir}")
-                logger.info(f"🐍 Python path: {sys.path[:3]}...")  # Show first 3 entries
-                
-                # Check if scoring files exist
-                fundamental_path = os.path.join(parent_dir, 'calc_fundamental_scores.py')
-                technical_path = os.path.join(parent_dir, 'calc_technical_scores_enhanced.py')
-                
-                logger.info(f"🔍 Checking fundamental scoring file: {fundamental_path}")
-                logger.info(f"   {'✅ EXISTS' if os.path.exists(fundamental_path) else '❌ MISSING'}")
-                
-                logger.info(f"🔍 Checking technical scoring file: {technical_path}")
-                logger.info(f"   {'✅ EXISTS' if os.path.exists(technical_path) else '❌ MISSING'}")
-                
-                # Add parent directory to path to find scoring modules
-                if parent_dir not in sys.path:
-                    sys.path.insert(0, parent_dir)  # Insert at beginning for higher priority
-                    logger.info(f"📦 Added to Python path: {parent_dir}")
-                
-                # Try importing with detailed error reporting
-                logger.info("🧪 Attempting to import FundamentalScoreCalculator...")
-                from calc_fundamental_scores import FundamentalScoreCalculator
-                logger.info("✅ FundamentalScoreCalculator imported successfully")
-                
-                logger.info("🧪 Attempting to import UniversalTechnicalScoreCalculator...")
-                from calc_technical_scores_universal import UniversalTechnicalScoreCalculator
-                logger.info("✅ UniversalTechnicalScoreCalculator imported successfully")
-                
-                logger.info("🎉 All scoring modules imported successfully!")
+                from .enhanced_full_spectrum_scoring import EnhancedFullSpectrumScoring
+                logger.info("✅ Enhanced Full Spectrum Scoring imported successfully")
                 
             except ImportError as e:
-                logger.error(f"❌ Failed to import scoring modules: {e}")
-                logger.error(f"📁 Current working directory: {os.getcwd()}")
-                logger.error(f"🐍 Full Python path: {sys.path}")
-                
-                # Check if files exist in different locations
-                possible_locations = [
-                    os.path.join(os.getcwd(), 'calc_fundamental_scores.py'),
-                    os.path.join(parent_dir, 'calc_fundamental_scores.py'),
-                    '/app/calc_fundamental_scores.py'
-                ]
-                
-                logger.error("🔍 Checking possible file locations:")
-                for location in possible_locations:
-                    exists = os.path.exists(location)
-                    logger.error(f"   {location}: {'EXISTS' if exists else 'MISSING'}")
-                
-                return {
-                    'phase': 'priority_5_daily_scores',
-                    'status': 'failed',
-                    'error': f'Import error: {str(e)}',
-                    'debug_info': {
-                        'current_dir': os.getcwd(),
-                        'script_dir': script_dir,
-                        'parent_dir': parent_dir,
-                        'python_path': sys.path[:5]  # First 5 entries
-                    },
-                    'successful_calculations': 0,
-                    'failed_calculations': 0,
-                    'processing_time': time.time() - start_time
-                }
-            except Exception as e:
-                logger.error(f"❌ Unexpected error during scoring module import: {e}")
-                return {
-                    'phase': 'priority_5_daily_scores',
-                    'status': 'failed',
-                    'error': f'Unexpected error: {str(e)}',
-                    'successful_calculations': 0,
-                    'failed_calculations': 0,
-                    'processing_time': time.time() - start_time
-                }
+                logger.error(f"❌ Failed to import Enhanced Full Spectrum Scoring: {e}")
+                # Fallback to legacy scoring if enhanced is not available
+                logger.warning("Falling back to legacy scoring system")
+                return self._calculate_legacy_daily_scores()
             
-            # Initialize scoring calculators
-            fundamental_calc = FundamentalScoreCalculator()
-            technical_calc = UniversalTechnicalScoreCalculator()
+            # Initialize enhanced scoring system
+            enhanced_scoring = EnhancedFullSpectrumScoring(db=self.db)
+            
+            if not enhanced_scoring.initialize():
+                logger.error("Failed to initialize Enhanced Full Spectrum Scoring")
+                return self._calculate_legacy_daily_scores()
             
             # Get all active tickers that have both fundamental and technical data
             tickers_with_data = self._get_tickers_with_complete_data()
-            logger.info(f"Found {len(tickers_with_data)} tickers with complete data for scoring")
+            logger.info(f"Found {len(tickers_with_data)} tickers with complete data for enhanced scoring")
             
             if not tickers_with_data:
                 logger.warning("No tickers with complete data found for scoring")
                 return {
-                    'phase': 'priority_5_daily_scores',
+                    'phase': 'priority_5_enhanced_daily_scores',
                     'status': 'skipped',
                     'reason': 'no_tickers_with_complete_data',
                     'successful_calculations': 0,
@@ -1238,13 +1170,140 @@ class DailyTradingSystem:
                     'processing_time': time.time() - start_time
                 }
             
-            # Calculate scores for each ticker
+            # Calculate enhanced scores for all tickers
+            scoring_results = enhanced_scoring.calculate_scores_for_all_tickers(tickers_with_data)
+            
+            processing_time = time.time() - start_time
+            
+            # Prepare detailed result
+            result = {
+                'phase': 'priority_5_enhanced_daily_scores',
+                'scoring_system': 'Enhanced Full Spectrum Scoring',
+                'tickers_processed': scoring_results.get('total_tickers', 0),
+                'successful_calculations': scoring_results.get('successful_calculations', 0),
+                'failed_calculations': scoring_results.get('failed_calculations', 0),
+                'processing_time': processing_time
+            }
+            
+            # Add summary statistics if available
+            if 'summary' in scoring_results:
+                result['summary'] = scoring_results['summary']
+                
+                # Log rating distribution
+                rating_dist = scoring_results['summary'].get('rating_distribution', {})
+                if rating_dist:
+                    logger.info("📊 Rating Distribution:")
+                    for rating, count in rating_dist.items():
+                        pct = (count / scoring_results['successful_calculations'] * 100) if scoring_results['successful_calculations'] > 0 else 0
+                        logger.info(f"   {rating}: {count} stocks ({pct:.1f}%)")
+                
+                # Check if full spectrum was achieved
+                full_spectrum = scoring_results['summary'].get('full_spectrum_achieved', False)
+                result['full_spectrum_achieved'] = full_spectrum
+                
+                if full_spectrum:
+                    logger.info("🎯 Full spectrum ratings achieved (4+ different rating levels)")
+                else:
+                    logger.warning("⚠️ Limited rating diversity - consider threshold adjustment")
+            
+            logger.info(f"PRIORITY 5: Enhanced daily scores completed - {result['successful_calculations']}/{result['tickers_processed']} successful")
+            
+            if result['successful_calculations'] > 0:
+                success_rate = (result['successful_calculations'] / result['tickers_processed']) * 100
+                logger.info(f"📈 Success rate: {success_rate:.1f}%")
+                
+                if success_rate >= 90:
+                    logger.info("🎉 Excellent scoring performance!")
+                elif success_rate >= 75:
+                    logger.info("👍 Good scoring performance")
+                else:
+                    logger.warning("⚠️ Lower than expected scoring performance")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in Priority 5 enhanced daily scores: {e}")
+            self.error_handler.handle_error(
+                "Priority 5 enhanced daily scores failed", e, ErrorSeverity.MEDIUM
+            )
+            
+            # Attempt fallback to legacy scoring
+            logger.warning("Attempting fallback to legacy scoring system")
+            try:
+                return self._calculate_legacy_daily_scores()
+            except Exception as fallback_error:
+                logger.error(f"Fallback scoring also failed: {fallback_error}")
+                return {
+                    'phase': 'priority_5_enhanced_daily_scores',
+                    'status': 'failed',
+                    'error': str(e),
+                    'fallback_error': str(fallback_error),
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': time.time() - start_time
+                }
+    
+    def _calculate_legacy_daily_scores(self) -> Dict:
+        """
+        Legacy fallback scoring method using the original scoring modules.
+        """
+        logger.info("Using legacy scoring system as fallback")
+        
+        try:
+            start_time = time.time()
+            
+            # Try importing legacy scoring modules
+            import sys
+            import os
+            
+            # Add parent directory to path to find scoring modules
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            parent_dir = os.path.dirname(script_dir)
+            
+            if parent_dir not in sys.path:
+                sys.path.insert(0, parent_dir)
+            
+            try:
+                from calc_fundamental_scores import FundamentalScoreCalculator
+                from calc_technical_scores_universal import UniversalTechnicalScoreCalculator
+                logger.info("✅ Legacy scoring modules imported successfully")
+                
+            except ImportError as e:
+                logger.error(f"❌ Failed to import legacy scoring modules: {e}")
+                return {
+                    'phase': 'priority_5_legacy_daily_scores',
+                    'status': 'failed',
+                    'error': f'Legacy import error: {str(e)}',
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Initialize legacy scoring calculators
+            fundamental_calc = FundamentalScoreCalculator()
+            technical_calc = UniversalTechnicalScoreCalculator()
+            
+            # Get all active tickers that have both fundamental and technical data
+            tickers_with_data = self._get_tickers_with_complete_data()
+            logger.info(f"Found {len(tickers_with_data)} tickers with complete data for legacy scoring")
+            
+            if not tickers_with_data:
+                return {
+                    'phase': 'priority_5_legacy_daily_scores',
+                    'status': 'skipped',
+                    'reason': 'no_tickers_with_complete_data',
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Calculate scores for each ticker using legacy method
             successful_calculations = 0
             failed_calculations = 0
             
             for ticker in tickers_with_data:
                 try:
-                    logger.debug(f"Calculating scores for {ticker}")
+                    logger.debug(f"Calculating legacy scores for {ticker}")
                     
                     # Calculate fundamental scores
                     fundamental_scores = fundamental_calc.calculate_fundamental_scores(ticker)
@@ -1253,43 +1312,42 @@ class DailyTradingSystem:
                     technical_scores = technical_calc.calculate_enhanced_technical_scores(ticker)
                     
                     if fundamental_scores and technical_scores:
-                        # Store combined scores
+                        # Store combined scores using legacy method
                         success = self._store_combined_scores(ticker, fundamental_scores, technical_scores)
                         if success:
                             successful_calculations += 1
-                            logger.debug(f"Successfully calculated and stored scores for {ticker}")
+                            logger.debug(f"Successfully calculated and stored legacy scores for {ticker}")
                         else:
                             failed_calculations += 1
-                            logger.warning(f"Failed to store scores for {ticker}")
+                            logger.warning(f"Failed to store legacy scores for {ticker}")
                     else:
                         failed_calculations += 1
-                        logger.warning(f"Failed to calculate scores for {ticker}")
+                        logger.warning(f"Failed to calculate legacy scores for {ticker}")
                         
                 except Exception as e:
                     failed_calculations += 1
-                    logger.error(f"Error calculating scores for {ticker}: {e}")
+                    logger.error(f"Error calculating legacy scores for {ticker}: {e}")
             
             processing_time = time.time() - start_time
             
             result = {
-                'phase': 'priority_5_daily_scores',
+                'phase': 'priority_5_legacy_daily_scores',
+                'scoring_system': 'Legacy Scoring (Fallback)',
                 'tickers_processed': len(tickers_with_data),
                 'successful_calculations': successful_calculations,
                 'failed_calculations': failed_calculations,
                 'processing_time': processing_time
             }
             
-            logger.info(f"PRIORITY 5: Daily scores completed - {successful_calculations}/{len(tickers_with_data)} successful")
+            logger.info(f"PRIORITY 5: Legacy daily scores completed - {successful_calculations}/{len(tickers_with_data)} successful")
             
             return result
             
         except Exception as e:
-            logger.error(f"Error in Priority 5 daily scores: {e}")
-            self.error_handler.handle_error(
-                "Priority 5 daily scores failed", e, ErrorSeverity.MEDIUM
-            )
+            logger.error(f"Error in legacy daily scores: {e}")
             return {
-                'phase': 'priority_5_daily_scores',
+                'phase': 'priority_5_legacy_daily_scores',
+                'status': 'failed',
                 'error': str(e),
                 'successful_calculations': 0,
                 'failed_calculations': 0,
