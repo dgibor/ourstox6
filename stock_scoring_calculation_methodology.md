@@ -198,6 +198,50 @@ Trading Signal Score = (Trend Signals × 0.35) + (Momentum Signals × 0.30) +
                       (Reversal Signals × 0.25) + (Confirmation × 0.10)
 ```
 
+### 3. VWAP & Support/Resistance Score (0-100)
+
+**Purpose:** Evaluates price position relative to key technical levels and volume-weighted pricing
+
+**Calculation Components:**
+
+#### A. VWAP Analysis (40% weight)
+- **Price vs VWAP** (25%): Current price relative to volume-weighted average
+- **VWAP Trend** (15%): VWAP direction and strength
+
+**VWAP Scoring:**
+- Price above VWAP with strong volume: 100 points
+- Price above VWAP with moderate volume: 85 points
+- Price at VWAP with high volume: 70 points
+- Price below VWAP with low volume: 40 points
+- Price below VWAP with high volume: 20 points
+
+#### B. Support Level Analysis (30% weight)
+- **Distance to Support** (20%): Risk assessment based on support proximity
+- **Support Strength** (10%): Historical reliability of support levels
+
+**Support Distance Scoring:**
+- Price within 2% of strong support: 100 points
+- Price within 5% of strong support: 85 points
+- Price within 10% of strong support: 70 points
+- Price within 15% of strong support: 50 points
+- Price more than 15% above support: 30 points
+
+#### C. Resistance Level Analysis (30% weight)
+- **Distance to Resistance** (20%): Upside potential assessment
+- **Resistance Strength** (10%): Historical reliability of resistance levels
+
+**Resistance Distance Scoring:**
+- Price within 2% of strong resistance: 20 points
+- Price within 5% of strong resistance: 40 points
+- Price within 10% of strong resistance: 60 points
+- Price within 15% of strong resistance: 80 points
+- Price more than 15% below resistance: 100 points
+
+**Calculation Formula:**
+```
+VWAP & S/R Score = (VWAP Analysis × 0.4) + (Support Analysis × 0.3) + (Resistance Analysis × 0.3)
+```
+
 ### 3. Technical Risk Score (0-100)
 
 **Purpose:** Identifies technical risks and volatility concerns
@@ -250,17 +294,18 @@ Adjusted Risk Score = Base Risk Score × Growth Multiplier × Sector Multiplier 
 **Purpose:** Combines all scores into a single investment recommendation
 
 **Weight Distribution:**
-- **Fundamental Health Score** (30%): Financial strength
+- **Fundamental Health Score** (25%): Financial strength
 - **Technical Health Score** (20%): Price trend strength
-- **Value Investment Score** (25%): Valuation attractiveness
-- **Trading Signal Score** (15%): Technical signals
+- **Value Investment Score** (20%): Valuation attractiveness
+- **VWAP & Support/Resistance Score** (15%): Technical level positioning
+- **Trading Signal Score** (10%): Technical signals
 - **Risk Adjustment** (10%): Risk factor consideration
 
 **Calculation Formula:**
 ```
-Composite Score = (Fundamental Health × 0.30) + (Technical Health × 0.20) + 
-                 (Value Score × 0.25) + (Trading Signal × 0.15) + 
-                 ((100 - Risk Score) × 0.10)
+Composite Score = (Fundamental Health × 0.25) + (Technical Health × 0.20) + 
+                 (Value Score × 0.20) + (VWAP & S/R Score × 0.15) + 
+                 (Trading Signal × 0.10) + ((100 - Risk Score) × 0.10)
 ```
 
 ---

@@ -166,7 +166,13 @@ class YahooFinanceService:
                             logger.warning(f"Total Stockholder Equity is zero or None, skipping ROE calculation")
                 
                 if 'Total Current Assets' in latest_bs and 'Total Current Liabilities' in latest_bs:
-
+                    if not ratios.get('current_ratio'):
+                        current_assets = latest_bs['Total Current Assets']
+                        current_liabilities = latest_bs['Total Current Liabilities']
+                        if current_assets and current_liabilities and current_liabilities != 0:
+                            additional_ratios['current_ratio'] = current_assets / current_liabilities
+                        else:
+                            logger.warning(f"Current Assets or Liabilities are zero or None, skipping current ratio calculation")
                 
                 if 'Total Revenue' in latest_is and 'Gross Profit' in latest_is:
                     if not ratios.get('gross_margin'):
