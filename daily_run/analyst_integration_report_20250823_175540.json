@@ -1,0 +1,66 @@
+{
+  "report_date": "2025-08-23T17:55:40.724123",
+  "success_rate": 100.0,
+  "found_count": 10,
+  "total_stocks": 10,
+  "test_results": {
+    "AAPL": {
+      "found": true,
+      "score": 72.0,
+      "date": "2025-08-23T00:00:00"
+    },
+    "MSFT": {
+      "found": true,
+      "score": 75.0,
+      "date": "2025-08-23T00:00:00"
+    },
+    "NVDA": {
+      "found": true,
+      "score": 83.0,
+      "date": "2025-08-23T00:00:00"
+    },
+    "TSLA": {
+      "found": true,
+      "score": 55.0,
+      "date": "2025-08-23T00:00:00"
+    },
+    "JPM": {
+      "found": true,
+      "score": 58.0,
+      "date": "2025-08-23T00:00:00"
+    },
+    "JNJ": {
+      "found": true,
+      "score": 68.0,
+      "date": "2025-08-23T00:00:00"
+    },
+    "XOM": {
+      "found": true,
+      "score": 49.0,
+      "date": "2025-08-23T00:00:00"
+    },
+    "KO": {
+      "found": true,
+      "score": 50.0,
+      "date": "2025-08-23T00:00:00"
+    },
+    "HD": {
+      "found": true,
+      "score": 58.0,
+      "date": "2025-08-23T00:00:00"
+    },
+    "CAT": {
+      "found": true,
+      "score": 53.0,
+      "date": "2025-08-23T00:00:00"
+    }
+  },
+  "statistics": {
+    "total_records": 16,
+    "unique_tickers": 10,
+    "min_score": 49.0,
+    "max_score": 83.0,
+    "avg_score": 64.75
+  },
+  "status": "SUCCESS"
+}

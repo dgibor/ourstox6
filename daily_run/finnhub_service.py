@@ -265,6 +265,70 @@ class FinnhubService:
             self.logger.error(f"Error fetching news for {ticker}: {e}")
             return []
     
+    def get_analyst_recommendations(self, ticker: str) -> Optional[Dict[str, Any]]:
+        """
+        Get analyst recommendations and price targets for a ticker.
+        
+        Returns:
+            Dict containing buy/sell counts, price targets, and revision data
+        """
+        try:
+            endpoint = "stock/recommendation"
+            params = {"symbol": ticker}
+            
+            data = self._make_request(endpoint, **params)
+            if data and isinstance(data, list) and len(data) > 0:
+                # Get the most recent recommendation
+                latest = data[0]
+                return {
+                    'buy': latest.get('buy', 0),
+                    'hold': latest.get('hold', 0),
+                    'sell': latest.get('sell', 0),
+                    'strongBuy': latest.get('strongBuy', 0),
+                    'strongSell': latest.get('strongSell', 0),
+                    'targetMean': latest.get('targetMean'),
+                    'targetMedian': latest.get('targetMedian'),
+                    'revisionCount': latest.get('revisionCount', 0),
+                    'date': latest.get('period')
+                }
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error getting analyst recommendations for {ticker}: {e}")
+            return None
+    
+    def get_earnings_calendar(self, ticker: str = None, start_date: str = None, end_date: str = None) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get earnings calendar data.
+        
+        Args:
+            ticker: Specific ticker to get earnings for
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            
+        Returns:
+            List of earnings data dictionaries
+        """
+        try:
+            endpoint = "calendar/earnings"
+            params = {}
+            
+            if ticker:
+                params["symbol"] = ticker
+            if start_date:
+                params["from"] = start_date
+            if end_date:
+                params["to"] = end_date
+            
+            data = self._make_request(endpoint, **params)
+            if data and isinstance(data, dict) and 'earningsCalendar' in data:
+                return data['earningsCalendar']
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Error getting earnings calendar: {e}")
+            return None
+    
     def _safe_numeric(self, value: Any) -> Optional[float]:
         """Safely convert value to float"""
         if value is None or value == 'None' or value == '-' or pd.isna(value):

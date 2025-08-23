@@ -1,0 +1,15 @@
+{
+  "verification_date": "2025-08-23T17:54:05.957319",
+  "table_structure_ok": true,
+  "test_stocks_results": {},
+  "overall_statistics": {
+    "total_analyst_records": 16,
+    "unique_tickers_with_analyst_scores": 10,
+    "min_score": 49.0,
+    "max_score": 83.0,
+    "avg_score": 64.75,
+    "total_records": 16,
+    "recent_records_last_hour": 0
+  },
+  "success": false
+}
