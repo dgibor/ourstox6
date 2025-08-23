@@ -171,6 +171,10 @@ class DailyTradingSystem:
             logger.info("🎯 PRIORITY 5: Calculating daily scores")
             scoring_result = self._calculate_daily_scores_with_progress()
             
+            # PRIORITY 6: Calculate analyst scores for all companies
+            logger.info("📊 PRIORITY 6: Calculating analyst scores")
+            analyst_result = self._calculate_analyst_scores()
+            
             # Cleanup: Remove delisted stocks to prevent future API errors
             logger.info("🧹 STEP 7: Starting cleanup of delisted stocks...")
             cleanup_result = self._cleanup_delisted_stocks()
@@ -185,6 +189,7 @@ class DailyTradingSystem:
                 'priority_3_historical_data': historical_result,
                 'priority_4_missing_fundamentals': missing_fundamentals_result,
                 'priority_5_daily_scores': scoring_result,
+                'priority_6_analyst_scores': analyst_result,
                 'cleanup_delisted_stocks': cleanup_result
             })
             
@@ -708,7 +713,7 @@ class DailyTradingSystem:
                     logger.error(f"   ❌ {ticker}: Error after {ticker_time:.2f}s - {e}")
             
             total_time = time.time() - start_time
-            logger.info(f"🎯 DAILY SCORES COMPLETED: {successful_calculations}/{len(tickers_with_data)} successful in {total_time/60:.1f} minutes")
+            logger.info(f"🎯 DAILY SCORES COMPLETED: {successful_calculations}/{len(tickers_with_data)} completed in {total_time/60:.1f} minutes")
             
             return {
                 'phase': 'priority_5_daily_scores',
@@ -729,6 +734,43 @@ class DailyTradingSystem:
                 'successful_calculations': 0,
                 'failed_calculations': 0,
                 'processing_time': total_time
+            }
+
+    def _calculate_analyst_scores(self) -> Dict:
+        """
+        PRIORITY 6: Calculate analyst scores for all companies using the dedicated manager.
+        """
+        try:
+            # Import analyst scoring manager
+            try:
+                from .analyst_scoring_manager import AnalystScoringManager
+                logger.info("✅ AnalystScoringManager imported successfully")
+            except ImportError as e:
+                logger.error(f"❌ Failed to import AnalystScoringManager: {e}")
+                return {
+                    'phase': 'priority_6_analyst_scores',
+                    'status': 'failed',
+                    'error': f'Import error: {str(e)}',
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': 0
+                }
+            
+            # Initialize and run analyst scoring
+            analyst_manager = AnalystScoringManager(db=self.db)
+            result = analyst_manager.calculate_all_analyst_scores(service_manager=self.service_manager)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Analyst scores calculation failed: {e}")
+            return {
+                'phase': 'priority_6_analyst_scores',
+                'status': 'failed',
+                'error': str(e),
+                'successful_calculations': 0,
+                'failed_calculations': 0,
+                'processing_time': 0
             }
 
     def _update_earnings_announcement_fundamentals(self) -> Dict:
@@ -1399,6 +1441,27 @@ class DailyTradingSystem:
             logger.error(f"Error getting tickers with complete data: {e}")
             return []
 
+    def _get_active_tickers(self) -> List[str]:
+        """
+        Get all active tickers for analyst scoring.
+        """
+        try:
+            query = """
+            SELECT ticker
+            FROM stocks
+            WHERE active = true
+            ORDER BY ticker
+            """
+            
+            results = self.db.execute_query(query)
+            tickers = [row[0] for row in results] if results else []
+            logger.info(f"Found {len(tickers)} active tickers for analyst scoring")
+            return tickers
+            
+        except Exception as e:
+            logger.error(f"Error getting active tickers: {e}")
+            return []
+
     def _store_combined_scores(self, ticker: str, fundamental_scores: Dict, technical_scores: Dict) -> bool:
         """
         Store combined fundamental and technical scores in the scoring tables.
@@ -2041,13 +2104,7 @@ class DailyTradingSystem:
                 'delisted_removed': 0
             }
 
-    def _get_active_tickers(self) -> List[str]:
-        """Get list of active tickers."""
-        try:
-            return self.db.get_tickers()
-        except Exception as e:
-            logger.error(f"Error getting active tickers: {e}")
-            return []
+    # Removed duplicate method - using the one at line 1517
 
     def _get_priority_tickers_for_technicals(self, all_tickers: List[str], limit: int = 200) -> List[str]:
         """
