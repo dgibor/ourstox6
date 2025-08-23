@@ -171,6 +171,10 @@ class DailyTradingSystem:
             logger.info("🎯 PRIORITY 5: Calculating daily scores")
             scoring_result = self._calculate_daily_scores_with_progress()
             
+            # PRIORITY 6: Calculate analyst scores for all companies
+            logger.info("📊 PRIORITY 6: Calculating analyst scores")
+            analyst_result = self._calculate_analyst_scores()
+            
             # Cleanup: Remove delisted stocks to prevent future API errors
             logger.info("🧹 STEP 7: Starting cleanup of delisted stocks...")
             cleanup_result = self._cleanup_delisted_stocks()
@@ -185,6 +189,7 @@ class DailyTradingSystem:
                 'priority_3_historical_data': historical_result,
                 'priority_4_missing_fundamentals': missing_fundamentals_result,
                 'priority_5_daily_scores': scoring_result,
+                'priority_6_analyst_scores': analyst_result,
                 'cleanup_delisted_stocks': cleanup_result
             })
             
@@ -2575,6 +2580,43 @@ class DailyTradingSystem:
             
         except Exception as e:
             logger.error(f"Error calculating fundamental ratios for {ticker}: {e}")
+
+    def _calculate_analyst_scores(self) -> Dict:
+        """
+        PRIORITY 6: Calculate analyst scores for all companies using the dedicated manager.
+        """
+        try:
+            # Import analyst scoring manager
+            try:
+                from analyst_scoring_manager import AnalystScoringManager
+                logger.info("✅ AnalystScoringManager imported successfully")
+            except ImportError as e:
+                logger.error(f"❌ Failed to import AnalystScoringManager: {e}")
+                return {
+                    'phase': 'priority_6_analyst_scores',
+                    'status': 'failed',
+                    'error': f'Import error: {str(e)}',
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': 0
+                }
+            
+            # Initialize and run analyst scoring
+            analyst_manager = AnalystScoringManager(db=self.db)
+            result = analyst_manager.calculate_all_analyst_scores(service_manager=self.service_manager)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Analyst scores calculation failed: {e}")
+            return {
+                'phase': 'priority_6_analyst_scores',
+                'status': 'failed',
+                'error': str(e),
+                'successful_calculations': 0,
+                'failed_calculations': 0,
+                'processing_time': 0
+            }
 
     def _compile_results(self, phase_results: Dict) -> Dict:
         """Compile results from all phases."""
