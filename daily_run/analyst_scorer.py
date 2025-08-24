@@ -107,16 +107,40 @@ class AnalystScorer:
             return None
     
     def get_analyst_recommendations(self, ticker: str) -> Optional[Dict]:
-        """Get analyst recommendations and estimates from Finnhub using multi-account system"""
+        """
+        Get analyst recommendations with robust fallback system:
+        1. Try Finnhub multi-account system (all 4 accounts)
+        2. Fall back to database data
+        3. Implement intelligent retry logic
+        """
         try:
             # Try to get from multi-account Finnhub system first
+            recommendations = self._try_finnhub_multi_account(ticker)
+            if recommendations:
+                return recommendations
+            
+            # Fallback to database data
+            logger.info(f"Finnhub failed for {ticker}, using database fallback")
+            return self._get_analyst_recommendations_from_db(ticker)
+            
+        except Exception as e:
+            logger.error(f"Error getting analyst recommendations for {ticker}: {e}")
+            return self._get_analyst_recommendations_from_db(ticker)
+    
+    def _try_finnhub_multi_account(self, ticker: str) -> Optional[Dict]:
+        """Try Finnhub multi-account system with intelligent retry logic"""
+        try:
+            from finnhub_multi_account_manager import FinnhubMultiAccountManager
+            
+            # Initialize multi-account manager
+            finnhub_manager = FinnhubMultiAccountManager()
+            
             try:
-                from finnhub_multi_account_manager import FinnhubMultiAccountManager
-                finnhub_manager = FinnhubMultiAccountManager()
+                # Get recommendations using the enhanced fallback system
                 recommendations = finnhub_manager.get_analyst_recommendations(ticker)
-                finnhub_manager.close()
                 
                 if recommendations:
+                    # Transform the data to match our expected format
                     return {
                         'buy_count': recommendations.get('buy', 0),
                         'hold_count': recommendations.get('hold', 0),
@@ -125,38 +149,66 @@ class AnalystScorer:
                         'strong_sell_count': recommendations.get('strongSell', 0),
                         'price_target': recommendations.get('targetMean', None),
                         'price_target_percent': recommendations.get('targetMedian', None),
-                        'revision_count': recommendations.get('revisionCount', 0)
+                        'revision_count': recommendations.get('revisionCount', 0),
+                        'data_source': 'finnhub_multi_account'
                     }
                 else:
-                    return self._get_analyst_recommendations_from_db(ticker)
-            except ImportError:
-                # Fallback to single API key if multi-account not available
-                try:
-                    from finnhub_service import FinnhubService
-                    finnhub = FinnhubService()
-                    recommendations = finnhub.get_analyst_recommendations(ticker)
-                    if recommendations:
-                        return {
-                            'buy_count': recommendations.get('buy', 0),
-                            'hold_count': recommendations.get('hold', 0),
-                            'sell_count': recommendations.get('sell', 0),
-                            'strong_buy_count': recommendations.get('strongBuy', 0),
-                            'strong_sell_count': recommendations.get('strongSell', 0),
-                            'price_target': recommendations.get('targetMean', None),
-                            'price_target_percent': recommendations.get('targetMedian', None),
-                            'revision_count': recommendations.get('revisionCount', 0)
-                        }
-                    else:
-                        return self._get_analyst_recommendations_from_db(ticker)
-                except ImportError:
-                    return self._get_analyst_recommendations_from_db(ticker)
+                    logger.warning(f"No analyst recommendations from Finnhub for {ticker}")
+                    return None
+                    
+            finally:
+                # Always close the manager to free resources
+                finnhub_manager.close()
+                
+        except ImportError:
+            logger.warning("Finnhub multi-account manager not available, trying single account")
+            return self._try_finnhub_single_account(ticker)
         except Exception as e:
-            logger.error(f"Error getting analyst recommendations for {ticker}: {e}")
-            return self._get_analyst_recommendations_from_db(ticker)
+            logger.warning(f"Finnhub multi-account failed for {ticker}: {e}")
+            return None
+    
+    def _try_finnhub_single_account(self, ticker: str) -> Optional[Dict]:
+        """Fallback to single Finnhub account if multi-account not available"""
+        try:
+            from finnhub_service import FinnhubService
+            
+            finnhub = FinnhubService()
+            
+            # Check if the service has analyst recommendations method
+            if not hasattr(finnhub, 'get_analyst_recommendations'):
+                logger.warning("Single Finnhub service does not support analyst recommendations")
+                return None
+            
+            recommendations = finnhub.get_analyst_recommendations(ticker)
+            
+            if recommendations:
+                return {
+                    'buy_count': recommendations.get('buy', 0),
+                    'hold_count': recommendations.get('hold', 0),
+                    'sell_count': recommendations.get('sell', 0),
+                    'strong_buy_count': recommendations.get('strongBuy', 0),
+                    'strong_sell_count': recommendations.get('strongSell', 0),
+                    'price_target': recommendations.get('targetMean', None),
+                    'price_target_percent': recommendations.get('targetMedian', None),
+                    'revision_count': recommendations.get('revisionCount', 0),
+                    'data_source': 'finnhub_single'
+                }
+            else:
+                logger.warning(f"No analyst recommendations from single Finnhub for {ticker}")
+                return None
+                
+        except ImportError:
+            logger.warning("Finnhub service not available")
+            return None
+        except Exception as e:
+            logger.warning(f"Single Finnhub account failed for {ticker}: {e}")
+            return None
     
     def _get_analyst_recommendations_from_db(self, ticker: str) -> Dict:
         """Fallback: Get analyst recommendations from database using correct table names"""
         try:
+            logger.info(f"Attempting database fallback for {ticker} analyst data")
+            
             # First check if the required tables exist
             table_check_query = """
             SELECT EXISTS (
@@ -190,6 +242,7 @@ class AnalystScorer:
                 upside_potential, confidence_level
             FROM analyst_targets 
             WHERE ticker = %s
+            LIMIT 1
             """
             
             targets_results = self.db.execute_query(targets_query, (ticker,))
@@ -203,7 +256,8 @@ class AnalystScorer:
                 'strong_sell_count': 0,
                 'price_target': None,
                 'price_target_percent': None,
-                'revision_count': 0
+                'revision_count': 0,
+                'data_source': 'database_fallback'
             }
             
             # Extract ratings data
@@ -217,6 +271,9 @@ class AnalystScorer:
                     'strong_sell_count': row[4] or 0,
                     'revision_count': row[5] or 0  # total_analysts as revision count
                 })
+                logger.info(f"Retrieved analyst ratings from database for {ticker}")
+            else:
+                logger.warning(f"No analyst ratings found in database for {ticker}")
             
             # Extract targets data
             if targets_results and targets_results[0]:
@@ -225,6 +282,19 @@ class AnalystScorer:
                     'price_target': row[0],  # avg_target_price
                     'price_target_percent': row[4]  # upside_potential
                 })
+                logger.info(f"Retrieved price targets from database for {ticker}")
+            else:
+                logger.warning(f"No price targets found in database for {ticker}")
+            
+            # Check if we got any meaningful data
+            total_ratings = (result['strong_buy_count'] + result['buy_count'] + 
+                           result['hold_count'] + result['sell_count'] + result['strong_sell_count'])
+            
+            if total_ratings > 0:
+                logger.info(f"Database fallback successful for {ticker}: {total_ratings} total ratings")
+            else:
+                logger.warning(f"Database fallback returned no ratings for {ticker}, using defaults")
+                return self._get_default_recommendations()
             
             return result
             
@@ -233,7 +303,8 @@ class AnalystScorer:
             return self._get_default_recommendations()
     
     def _get_default_recommendations(self) -> Dict:
-        """Return default neutral recommendations when database access fails"""
+        """Return default neutral recommendations when all data sources fail"""
+        logger.warning("Using default neutral analyst recommendations - all data sources failed")
         return {
             'buy_count': 0,
             'hold_count': 0,
@@ -242,7 +313,8 @@ class AnalystScorer:
             'strong_sell_count': 0,
             'price_target': None,
             'price_target_percent': None,
-            'revision_count': 0
+            'revision_count': 0,
+            'data_source': 'default_neutral'
         }
     
     def calculate_earnings_proximity_score(self, earnings_data: Dict) -> int:
