@@ -10,6 +10,7 @@ import os
 import time
 import logging
 import threading
+import requests
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from dotenv import load_dotenv
@@ -162,89 +163,100 @@ class FinnhubMultiAccountManager:
                              key=lambda x: self.calls_per_day - self.account_usage[x]['daily_calls'])
             return best_account
     
-    def make_api_call(self, endpoint: str, params: Dict = None, stock_ticker: str = None) -> Optional[Dict]:
+    def make_api_call(self, endpoint: str, params: Optional[Dict] = None, ticker: str = None) -> Optional[Dict]:
         """
-        Make an API call using the best available account
+        Make an API call with automatic fallback to other accounts if one fails
         
         Args:
-            endpoint: API endpoint (e.g., 'quote', 'analyst-recommendations')
+            endpoint: API endpoint to call
             params: Query parameters
-            stock_ticker: Stock ticker for logging purposes
-        
+            ticker: Ticker symbol for logging
+            
         Returns:
-            API response data or None if failed
+            API response data or None if all accounts fail
         """
-        import requests
-        
-        account_id = self.get_available_account(stock_ticker)
-        api_key = self.api_keys[account_id]
-        
-        # Check rate limiting
-        current_time = time.time()
-        rate_limit = self.account_rate_limits[account_id]
-        
-        # Reset minute counter if a minute has passed
-        if current_time - rate_limit['last_call'] >= self.minute_reset:
-            rate_limit['calls_this_minute'] = 0
-        
-        # Check if we can make a call this minute
-        if rate_limit['calls_this_minute'] >= self.calls_per_minute:
-            # Wait until next minute
-            wait_time = self.minute_reset - (current_time - rate_limit['last_call'])
-            if wait_time > 0:
-                logger.info(f"⏳ Account {account_id + 1} rate limited, waiting {wait_time:.1f} seconds...")
-                time.sleep(wait_time)
-                current_time = time.time()
+        # Try each account in order until one succeeds
+        for attempt in range(self.accounts_count):
+            account_id = attempt
+            api_key = self.api_keys[account_id]
+            
+            # Check rate limiting for this account
+            current_time = time.time()
+            rate_limit = self.account_rate_limits[account_id]
+            
+            # Reset minute counter if a minute has passed
+            if current_time - rate_limit['last_call'] >= self.minute_reset:
                 rate_limit['calls_this_minute'] = 0
-        
-        # Make the API call
-        try:
-            url = f"https://finnhub.io/api/v1/{endpoint}"
-            if params is None:
-                params = {}
-            params['token'] = api_key
             
-            start_time = time.time()
-            response = requests.get(url, params=params, timeout=30)
-            call_time = time.time() - start_time
+            # Check if we can make a call this minute
+            if rate_limit['calls_this_minute'] >= self.calls_per_minute:
+                logger.debug(f"⏳ Account {account_id + 1} rate limited, trying next account...")
+                continue  # Try next account instead of waiting
             
-            # Update usage tracking
-            with self._usage_lock:
-                self.account_usage[account_id]['daily_calls'] += 1
-                rate_limit['calls_this_minute'] += 1
-                rate_limit['last_call'] = current_time
-                self.performance_metrics['calls_per_account'][account_id] += 1
+            # Make the API call
+            try:
+                url = f"https://finnhub.io/api/v1/{endpoint}"
+                if params is None:
+                    params = {}
+                params['token'] = api_key
                 
-                # Add call time with rolling window limit
-                self.performance_metrics['api_call_times'].append(call_time)
-                if len(self.performance_metrics['api_call_times']) > self.MAX_CALL_TIMES:
-                    # Keep only the most recent call times
-                    self.performance_metrics['api_call_times'] = self.performance_metrics['api_call_times'][-self.MAX_CALL_TIMES:]
-            
-            if response.status_code == 200:
-                # Check if response has content before parsing
-                if response.content:
-                    try:
-                        data = response.json()
-                        if isinstance(data, dict) and 'error' in data:
-                            logger.error(f"API error from account {account_id + 1}: {data['error']}")
-                            return None
-                        
-                        logger.debug(f"✅ API call successful from account {account_id + 1} in {call_time:.2f}s")
-                        return data
-                    except Exception as json_error:
-                        logger.error(f"JSON parsing error from account {account_id + 1}: {json_error}")
-                        return None
+                start_time = time.time()
+                response = requests.get(url, params=params, timeout=30)
+                call_time = time.time() - start_time
+                
+                # Update usage tracking
+                with self._usage_lock:
+                    self.account_usage[account_id]['daily_calls'] += 1
+                    rate_limit['calls_this_minute'] += 1
+                    rate_limit['last_call'] = current_time
+                    self.performance_metrics['calls_per_account'][account_id] += 1
+                    
+                    # Add call time with rolling window limit
+                    self.performance_metrics['api_call_times'].append(call_time)
+                    if len(self.performance_metrics['api_call_times']) > self.MAX_CALL_TIMES:
+                        # Keep only the most recent call times
+                        self.performance_metrics['api_call_times'] = self.performance_metrics['api_call_times'][-self.MAX_CALL_TIMES:]
+                
+                if response.status_code == 200:
+                    # Check if response has content before parsing
+                    if response.content:
+                        try:
+                            data = response.json()
+                            if isinstance(data, dict) and 'error' in data:
+                                logger.warning(f"⚠️ API error from account {account_id + 1}: {data['error']}")
+                                # Try next account instead of giving up
+                                continue
+                            
+                            logger.debug(f"✅ API call successful from account {account_id + 1} in {call_time:.2f}s")
+                            return data
+                        except Exception as json_error:
+                            logger.warning(f"⚠️ JSON parsing error from account {account_id + 1}: {json_error}")
+                            # Try next account instead of giving up
+                            continue
+                    else:
+                        logger.warning(f"⚠️ Empty response from account {account_id + 1}")
+                        # Try next account instead of giving up
+                        continue
+                elif response.status_code == 429:  # Rate limited
+                    logger.warning(f"⚠️ Rate limited on account {account_id + 1}, trying next account...")
+                    # Mark this account as rate limited and try next
+                    rate_limit['calls_this_minute'] = self.calls_per_minute
+                    continue
                 else:
-                    logger.warning(f"Empty response from account {account_id + 1}")
-                    return None
-            else:
-                logger.error(f"❌ HTTP {response.status_code} from account {account_id + 1}: {response.text}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"❌ API call failed from account {account_id + 1}: {e}")
-            return None
+                    logger.warning(f"⚠️ HTTP {response.status_code} from account {account_id + 1}: {response.text}")
+                    # Try next account instead of giving up
+                    continue
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ API call failed on account {account_id + 1}: {e}")
+                # Try next account instead of giving up
+                continue
+        
+        # If we get here, all accounts failed
+        logger.error(f"❌ All {self.accounts_count} Finnhub accounts failed for endpoint: {endpoint}")
+        if ticker:
+            logger.error(f"❌ Failed to fetch data for ticker: {ticker}")
+        return None
     
     def get_analyst_recommendations(self, ticker: str) -> Optional[Dict]:
         """Get analyst recommendations using the multi-account system"""
@@ -317,6 +329,33 @@ class FinnhubMultiAccountManager:
                 }
             
             return status
+    
+    def get_fallback_summary(self) -> Dict:
+        """Get summary of fallback usage across accounts"""
+        with self._usage_lock:
+            summary = {
+                'total_calls': sum(self.performance_metrics['calls_per_account'].values()),
+                'calls_per_account': self.performance_metrics['calls_per_account'].copy(),
+                'account_health': {}
+            }
+            
+            for account_id in range(self.accounts_count):
+                rate_limit = self.account_rate_limits[account_id]
+                usage = self.account_usage[account_id]
+                
+                # Calculate health score (0-100)
+                minute_health = max(0, 100 - (rate_limit['calls_this_minute'] / self.calls_per_minute * 100))
+                daily_health = max(0, 100 - (usage['daily_calls'] / self.calls_per_day * 100))
+                overall_health = (minute_health + daily_health) / 2
+                
+                summary['account_health'][account_id] = {
+                    'health_score': round(overall_health, 1),
+                    'minute_health': round(minute_health, 1),
+                    'daily_health': round(daily_health, 1),
+                    'status': 'healthy' if overall_health > 70 else 'warning' if overall_health > 30 else 'critical'
+                }
+            
+            return summary
     
     def close(self):
         """Clean up resources"""

@@ -13,8 +13,8 @@ from enum import Enum
 from dataclasses import dataclass
 import json
 
-from database import DatabaseManager
-from error_handler import ErrorHandler
+from .database import DatabaseManager
+from .error_handler import ErrorHandler
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +98,23 @@ class APIFlowManager:
                     max_calls_per_minute=60,
                     max_calls_per_day=None,
                     cost_per_call=0.0,
-                    batch_size=100,
-                    fallback_delay=0.5
+                    batch_size=50,
+                    fallback_delay=6.0
+                ),
+                APIFlowRule(
+                    service_id='finnhub',  # Finnhub promoted to priority 2 (best API)
+                    data_type=DataType.PRICING,
+                    priority=2,
+                    max_calls_per_minute=60,
+                    max_calls_per_day=None,
+                    cost_per_call=0.0,
+                    batch_size=1,
+                    fallback_delay=1.0
                 ),
                 APIFlowRule(
                     service_id='fmp',
                     data_type=DataType.PRICING,
-                    priority=2,
+                    priority=3,
                     max_calls_per_minute=10,
                     max_calls_per_day=1000,
                     cost_per_call=0.001,
@@ -112,24 +122,14 @@ class APIFlowManager:
                     fallback_delay=6.0
                 ),
                 APIFlowRule(
-                    service_id='polygon',
+                    service_id='polygon',  # Polygon.io demoted due to rate limiting
                     data_type=DataType.PRICING,
-                    priority=3,
+                    priority=4,
                     max_calls_per_minute=300,
                     max_calls_per_day=None,
                     cost_per_call=0.002,
                     batch_size=100,
                     fallback_delay=0.2
-                ),
-                APIFlowRule(
-                    service_id='finnhub',
-                    data_type=DataType.PRICING,
-                    priority=4,
-                    max_calls_per_minute=60,
-                    max_calls_per_day=None,
-                    cost_per_call=0.0,
-                    batch_size=1,
-                    fallback_delay=1.0
                 ),
                 APIFlowRule(
                     service_id='alpha_vantage',
@@ -145,9 +145,19 @@ class APIFlowManager:
             
             DataType.FUNDAMENTALS: [
                 APIFlowRule(
-                    service_id='yahoo',
+                    service_id='finnhub',  # Finnhub promoted to priority 1 (best API)
                     data_type=DataType.FUNDAMENTALS,
                     priority=1,
+                    max_calls_per_minute=60,
+                    max_calls_per_day=None,
+                    cost_per_call=0.0,
+                    batch_size=1,
+                    fallback_delay=1.0
+                ),
+                APIFlowRule(
+                    service_id='yahoo',
+                    data_type=DataType.FUNDAMENTALS,
+                    priority=2,
                     max_calls_per_minute=60,
                     max_calls_per_day=None,
                     cost_per_call=0.0,
@@ -157,7 +167,7 @@ class APIFlowManager:
                 APIFlowRule(
                     service_id='fmp',
                     data_type=DataType.FUNDAMENTALS,
-                    priority=2,
+                    priority=3,
                     max_calls_per_minute=10,
                     max_calls_per_day=1000,
                     cost_per_call=0.001,
@@ -167,7 +177,7 @@ class APIFlowManager:
                 APIFlowRule(
                     service_id='alpha_vantage',
                     data_type=DataType.FUNDAMENTALS,
-                    priority=3,
+                    priority=4,
                     max_calls_per_minute=5,
                     max_calls_per_day=100,
                     cost_per_call=0.0,
@@ -175,24 +185,14 @@ class APIFlowManager:
                     fallback_delay=12.0
                 ),
                 APIFlowRule(
-                    service_id='polygon',
+                    service_id='polygon',  # Polygon.io demoted to lowest priority due to rate limiting
                     data_type=DataType.FUNDAMENTALS,
-                    priority=4,
+                    priority=5,
                     max_calls_per_minute=300,
                     max_calls_per_day=None,
                     cost_per_call=0.002,
                     batch_size=1,
                     fallback_delay=0.2
-                ),
-                APIFlowRule(
-                    service_id='finnhub',
-                    data_type=DataType.FUNDAMENTALS,
-                    priority=5,
-                    max_calls_per_minute=60,
-                    max_calls_per_day=None,
-                    cost_per_call=0.0,
-                    batch_size=1,
-                    fallback_delay=1.0
                 )
             ],
             

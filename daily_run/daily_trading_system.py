@@ -2489,7 +2489,7 @@ class DailyTradingSystem:
     def _get_historical_data_to_minimum(self, ticker: str, min_days: int = 100) -> Dict:
         """
         Get historical data for a ticker to ensure minimum days requirement using all available sources.
-        Fallback order: FMP → Yahoo → Polygon → Finnhub → AlphaVantage
+        Fallback order: Finnhub → FMP → Yahoo → AlphaVantage (Polygon.io removed due to rate limiting)
         Logs/report sources tried, days fetched, and final status.
         """
         import json
@@ -2529,11 +2529,11 @@ class DailyTradingSystem:
                 }
             days_needed = min_days - current_days + 20
             sources = [
+                ('finnhub', 'finnhub', 'finnhub_historical_data'),  # Finnhub first (best API)
                 ('fmp', 'fmp', 'fmp_historical_data'),
                 ('yahoo_finance', 'yahoo', 'yahoo_historical_data'),
-                ('polygon', 'polygon', 'polygon_historical_data'),
-                ('finnhub', 'finnhub', 'finnhub_historical_data'),
                 ('alpha_vantage', 'alpha_vantage', 'alpha_vantage_historical_data')
+                # Polygon.io removed due to rate limiting issues
             ]
             for service_name, log_name, reason in sources:
                 try:

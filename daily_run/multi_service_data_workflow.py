@@ -220,9 +220,9 @@ class MultiServiceDataWorkflow:
         
         return results
     
-    def get_service_priority_for_data_type(self, data_type: str = 'fundamentals') -> List[str]:
+    def get_service_priority_for_data_type(self, data_type: str) -> List[str]:
         """
-        Get optimized service priority based on data type
+        Get optimized service priority list for a specific data type.
         
         Args:
             data_type: 'fundamentals' or 'pricing'
@@ -231,11 +231,13 @@ class MultiServiceDataWorkflow:
             Optimized service priority list for the data type
         """
         if data_type == 'pricing':
-            # For pricing: Yahoo (free, reliable) → Polygon (batch, high quality) → Alpha Vantage (free tier) → Finnhub (free tier) → FMP (paid, limited)
-            return ['yahoo', 'polygon', 'alphavantage', 'finnhub', 'fmp']
+            # For pricing: Finnhub (best API) → Yahoo (free, reliable) → Alpha Vantage (free tier) → FMP (paid, limited)
+            # Polygon.io removed due to rate limiting issues
+            return ['finnhub', 'yahoo', 'alphavantage', 'fmp']
         else:
-            # For fundamentals: Yahoo (free, comprehensive) → FMP (paid, high quality) → Polygon (paid, good) → Alpha Vantage (free tier) → Finnhub (free tier)
-            return ['yahoo', 'fmp', 'polygon', 'alphavantage', 'finnhub']
+            # For fundamentals: Finnhub (best API) → Yahoo (free, comprehensive) → FMP (paid, high quality) → Alpha Vantage (free tier)
+            # Polygon.io removed due to rate limiting issues
+            return ['finnhub', 'yahoo', 'fmp', 'alphavantage']
     
     def _fetch_ticker_multi_service(self, ticker: str, data_type: str = 'fundamentals') -> Dict[str, Any]:
         """
