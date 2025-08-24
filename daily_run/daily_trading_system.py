@@ -2565,12 +2565,20 @@ class DailyTradingSystem:
                                 }
                             else:
                                 result['details'].append(f"Fetched {days_fetched} days from {log_name}, still insufficient")
+                                # Continue to next service to try to get more data
+                                continue
                         else:
                             result['details'].append(f"No data from {log_name}")
+                            # Continue to next service
+                            continue
                     else:
                         result['details'].append(f"Service {log_name} not available or missing get_historical_data")
+                        # Continue to next service
+                        continue
                 except Exception as e:
                     result['details'].append(f"{log_name} error: {e}")
+                    # Continue to next service
+                    continue
             # If we get here, all sources failed or not enough data
             result['status'] = 'partial' if result['days_after'] > 0 else 'fail'
             report[ticker] = result
