@@ -19,6 +19,12 @@ PRIORITY 4:
 - Fill missing fundamental data for companies
 - Uses any remaining API calls after priorities 1, 2, and 3
 
+PRIORITY 5: 
+- Calculate daily scores for all companies
+
+PRIORITY 6: 
+- Calculate analyst scores for all companies
+
 The system respects API rate limits and prioritizes the most time-sensitive operations first.
 """
 
@@ -75,6 +81,26 @@ class DailyTradingSystem:
         self.error_handler = ErrorHandler("daily_trading_system")
         self.monitoring = SystemMonitor()
         
+        # Priority timeout configuration (configurable) - All priorities now have timeouts
+        self.priority_timeouts = {
+            'priority_1_technical': 1800,      # 30 minutes for technical indicators & price updates (700 stocks)
+            'priority_2_earnings': 900,        # 15 minutes for earnings fundamentals (5-20 stocks)
+            'priority_3_historical': 1200,     # 20 minutes for historical data (700 stocks)
+            'priority_4_fundamentals': 600,    # 10 minutes for missing fundamentals (700 stocks)
+            'priority_5_scores': 900,          # 15 minutes for daily scores (700 stocks)
+            'priority_6_analyst': 600          # 10 minutes for analyst data (700 stocks)
+        }
+        
+        # Processing limits to prevent blocking - Updated for 700 stocks
+        self.processing_limits = {
+            'priority_1_max_tickers': 700,     # Process all 700 stocks for technical indicators
+            'priority_2_max_tickers': 50,      # Process up to 50 stocks for earnings (typically 5-20)
+            'priority_3_max_tickers': 700,     # Process all 700 stocks for historical data
+            'priority_4_max_tickers': 700,     # Process all 700 stocks for fundamentals
+            'priority_5_max_tickers': 700,     # Process all 700 stocks for daily scores
+            'priority_6_max_tickers': 700      # Process all 700 stocks for analyst data
+        }
+        
         # Initialize processors
         self.batch_price_processor = BatchPriceProcessor(
             db=self.db,
@@ -107,6 +133,8 @@ class DailyTradingSystem:
         2. Update fundamental information for companies with earnings announcements that day
         3. Update historical prices until at least 100 days of data for every company
         4. Fill missing fundamental data for companies
+        5. Calculate daily scores for all companies
+        6. Calculate analyst scores for all companies
         
         Args:
             force_run: Force run even if market was closed
@@ -289,6 +317,7 @@ class DailyTradingSystem:
         """
         Update daily_charts table with latest prices using batch processing.
         Only processes tickers that don't already have today's data.
+        Limited to prevent blocking Priority 6 (analyst data collection).
         """
         logger.info("Updating daily prices with batch processing")
         
@@ -313,26 +342,58 @@ class DailyTradingSystem:
                     'data_stored_in': 'daily_charts'
                 }
             
-            # Process batch prices (100 stocks per API call)
-            price_data = self.batch_price_processor.process_batch_prices(tickers_needing_updates)
+            # Limit processing to prevent blocking Priority 6
+            max_tickers_to_process = min(self.processing_limits['priority_1_max_tickers'], len(tickers_needing_updates))
+            tickers_to_process = tickers_needing_updates[:max_tickers_to_process]
+            
+            if len(tickers_needing_updates) > max_tickers_to_process:
+                logger.info(f"Limiting processing to {max_tickers_to_process} tickers to ensure Priority 6 runs")
+                logger.info(f"Remaining {len(tickers_needing_updates) - max_tickers_to_process} tickers will be processed in future runs")
+            
+            # Process batch prices (100 stocks per API call) with timeout
+            max_processing_time = self.priority_timeouts['priority_1_technical']
+            logger.info(f"Processing {len(tickers_to_process)} tickers (max time: {max_processing_time}s)")
+            
+            # Check time constraint before processing
+            elapsed_time = time.time() - start_time
+            if elapsed_time > max_processing_time:
+                logger.info(f"Time limit reached ({elapsed_time:.1f}s > {max_processing_time}s) - stopping Priority 1 to allow Priority 6 to run")
+                return {
+                    'phase': 'daily_price_update',
+                    'status': 'timeout',
+                    'reason': 'time_limit_reached',
+                    'total_tickers': len(tickers_needing_updates),
+                    'tickers_processed': 0,
+                    'successful_updates': 0,
+                    'failed_updates': 0,
+                    'processing_time': elapsed_time,
+                    'api_calls_used': 0,
+                    'data_stored_in': 'daily_charts'
+                }
+            
+            price_data = self.batch_price_processor.process_batch_prices(tickers_to_process)
             
             processing_time = time.time() - start_time
-            api_calls_used = (len(tickers_needing_updates) + 99) // 100  # 100 per call
+            api_calls_used = (len(tickers_to_process) + 99) // 100  # 100 per call
             self.api_calls_used += api_calls_used
             
             result = {
                 'phase': 'daily_price_update',
                 'total_tickers': len(tickers_needing_updates),
+                'tickers_processed': len(tickers_to_process),
                 'successful_updates': len(price_data),
-                'failed_updates': len(tickers_needing_updates) - len(price_data),
-                'success_rate': len(price_data) / len(tickers_needing_updates) if tickers_needing_updates else 0,
+                'failed_updates': len(tickers_to_process) - len(price_data),
+                'success_rate': len(price_data) / len(tickers_to_process) if tickers_to_process else 0,
                 'processing_time': processing_time,
                 'api_calls_used': api_calls_used,
-                'data_stored_in': 'daily_charts'
+                'data_stored_in': 'daily_charts',
+                'time_limit_reached': processing_time >= max_processing_time
             }
             
-            logger.info(f"Daily prices updated: {result['successful_updates']}/{result['total_tickers']} successful")
-            logger.info(f"API calls used: {api_calls_used}")
+            if processing_time >= max_processing_time:
+                logger.info(f"PRIORITY 1: Time limit reached - {len(price_data)} tickers updated, continuing to Priority 6")
+            else:
+                logger.info(f"PRIORITY 1: Daily prices completed - {len(price_data)} tickers updated")
             
             return result
             
@@ -405,6 +466,7 @@ class DailyTradingSystem:
         """
         PRIORITY 1: Calculate technical indicators based on updated price data.
         This is called immediately after price updates on trading days.
+        Limited to prevent blocking Priority 6 (analyst data collection).
         """
         logger.info("📊 PRIORITY 1: Calculating technical indicators for all stocks")
         
@@ -414,6 +476,30 @@ class DailyTradingSystem:
             # Get all active tickers (since we just updated prices for all)
             tickers = self._get_active_tickers()
             logger.info(f"📊 Processing technical indicators for {len(tickers)} tickers")
+            
+            # Limit processing to prevent blocking Priority 6
+            max_tickers_to_process = min(self.processing_limits['priority_1_max_tickers'], len(tickers))
+            tickers_to_process = tickers[:max_tickers_to_process]
+            
+            if len(tickers) > max_tickers_to_process:
+                logger.info(f"Limiting processing to {max_tickers_to_process} tickers to ensure Priority 6 runs")
+                logger.info(f"Remaining {len(tickers) - max_tickers_to_process} tickers will be processed in future runs")
+            
+            # Check time constraint before processing
+            max_processing_time = self.priority_timeouts['priority_1_technical']
+            elapsed_time = time.time() - start_time
+            if elapsed_time > max_processing_time:
+                logger.info(f"Time limit reached ({elapsed_time:.1f}s > {max_processing_time}s) - stopping Priority 1 to allow Priority 6 to run")
+                return {
+                    'phase': 'priority_1_technical_indicators',
+                    'status': 'timeout',
+                    'reason': 'time_limit_reached',
+                    'total_tickers': len(tickers),
+                    'tickers_processed': 0,
+                    'successful_calculations': 0,
+                    'failed_calculations': 0,
+                    'processing_time': elapsed_time
+                }
             
             # Check if comprehensive calculator is available
             logger.info("🔍 Checking technical calculator availability...")
@@ -440,6 +526,7 @@ class DailyTradingSystem:
                         'status': 'skipped',
                         'reason': 'calculator_not_found',
                         'total_tickers': len(tickers),
+                        'tickers_processed': len(tickers_to_process),
                         'successful_calculations': 0,
                         'failed_calculations': 0,
                         'processing_time': time.time() - start_time
@@ -454,27 +541,33 @@ class DailyTradingSystem:
                     'status': 'failed',
                     'error': f'Calculator check failed: {str(import_error)}',
                     'total_tickers': len(tickers),
+                    'tickers_processed': len(tickers_to_process),
                     'successful_calculations': 0,
                     'failed_calculations': 0,
                     'processing_time': time.time() - start_time
                 }
             
-            # Calculate technical indicators for all tickers
-            logger.info("📊 Starting technical indicator calculations...")
-            technical_result = self._calculate_technical_indicators_with_progress(tickers)
+            # Calculate technical indicators for limited tickers with timeout
+            logger.info(f"📊 Starting technical indicator calculations for {len(tickers_to_process)} tickers (max time: {max_processing_time}s)")
+            technical_result = self._calculate_technical_indicators_with_progress(tickers_to_process)
             
             processing_time = time.time() - start_time
             
             result = {
                 'phase': 'priority_1_technical_indicators',
                 'total_tickers': len(tickers),
+                'tickers_processed': len(tickers_to_process),
                 'successful_calculations': technical_result.get('successful_calculations', 0),
                 'failed_calculations': technical_result.get('failed_calculations', 0),
                 'historical_fetches': technical_result.get('historical_fetches', 0),
-                'processing_time': processing_time
+                'processing_time': processing_time,
+                'time_limit_reached': processing_time >= max_processing_time
             }
             
-            logger.info(f"✅ PRIORITY 1: Technical indicators completed - {result['successful_calculations']}/{result['total_tickers']} successful")
+            if processing_time >= max_processing_time:
+                logger.info(f"PRIORITY 1: Time limit reached - {result['successful_calculations']} tickers processed, continuing to Priority 6")
+            else:
+                logger.info(f"✅ PRIORITY 1: Technical indicators completed - {result['successful_calculations']}/{result['tickers_processed']} successful")
             
             return result
             
@@ -668,14 +761,29 @@ class DailyTradingSystem:
             # Calculate scores for each ticker with progress tracking
             successful_calculations = 0
             failed_calculations = 0
+            max_processing_time = self.priority_timeouts['priority_5_scores']
+            max_tickers_to_process = min(self.processing_limits['priority_5_max_tickers'], len(tickers_with_data))
             
-            logger.info(f"🚀 STARTING SCORE CALCULATIONS for {len(tickers_with_data)} tickers")
+            # Limit processing to prevent blocking Priority 6
+            tickers_to_process = tickers_with_data[:max_tickers_to_process]
+            if len(tickers_with_data) > max_tickers_to_process:
+                logger.info(f"Limiting processing to {max_tickers_to_process} tickers to ensure Priority 6 runs")
+                logger.info(f"Remaining {len(tickers_with_data) - max_tickers_to_process} tickers will be processed in future runs")
             
-            for i, ticker in enumerate(tickers_with_data, 1):
+            logger.info(f"🚀 STARTING SCORE CALCULATIONS for {len(tickers_to_process)} tickers (max time: {max_processing_time}s)")
+            
+            for i, ticker in enumerate(tickers_to_process, 1):
+                # Check time constraint
+                elapsed_time = time.time() - start_time
+                if elapsed_time > max_processing_time:
+                    logger.info(f"Time limit reached ({elapsed_time:.1f}s > {max_processing_time}s) - stopping Priority 5 to allow Priority 6 to run")
+                    logger.info(f"Progress: {successful_calculations + failed_calculations}/{len(tickers_to_process)} tickers processed")
+                    break
+                
                 ticker_start_time = time.time()
                 
                 try:
-                    logger.info(f"📊 [{i}/{len(tickers_with_data)}] Calculating scores for {ticker}")
+                    logger.info(f"📊 [{i}/{len(tickers_to_process)}] Calculating scores for {ticker} - Elapsed: {elapsed_time:.1f}s")
                     
                     # Calculate fundamental scores
                     logger.debug(f"   📈 Calculating fundamental scores for {ticker}")
@@ -697,8 +805,8 @@ class DailyTradingSystem:
                             logger.info(f"   ✅ {ticker}: Scores calculated and stored in {ticker_time:.2f}s")
                             
                             # Progress update every 10 tickers
-                            if i % 10 == 0 or i == len(tickers_with_data):
-                                logger.info(f"📊 SCORING PROGRESS: {i}/{len(tickers_with_data)} completed ({i/len(tickers_with_data)*100:.1f}%)")
+                            if i % 10 == 0 or i == len(tickers_to_process):
+                                logger.info(f"📊 SCORING PROGRESS: {i}/{len(tickers_to_process)} completed ({i/len(tickers_to_process)*100:.1f}%)")
                         else:
                             failed_calculations += 1
                             logger.warning(f"   ❌ {ticker}: Failed to store scores after {ticker_time:.2f}s")
@@ -713,12 +821,12 @@ class DailyTradingSystem:
                     logger.error(f"   ❌ {ticker}: Error after {ticker_time:.2f}s - {e}")
             
             total_time = time.time() - start_time
-            logger.info(f"🎯 DAILY SCORES COMPLETED: {successful_calculations}/{len(tickers_with_data)} successful in {total_time/60:.1f} minutes")
+            logger.info(f"🎯 DAILY SCORES COMPLETED: {successful_calculations}/{len(tickers_to_process)} successful in {total_time/60:.1f} minutes")
             
             return {
                 'phase': 'priority_5_daily_scores',
                 'status': 'completed',
-                'total_tickers': len(tickers_with_data),
+                'total_tickers': len(tickers_to_process),
                 'successful_calculations': successful_calculations,
                 'failed_calculations': failed_calculations,
                 'processing_time': total_time
@@ -740,6 +848,7 @@ class DailyTradingSystem:
         """
         PRIORITY 2: Update fundamental information for companies with earnings announcements that day.
         Calculate fundamental ratios based on updated stock prices.
+        Limited to prevent blocking Priority 6 (analyst data collection).
         """
         logger.info("📊 PRIORITY 2: Processing earnings announcements and fundamental updates")
         
@@ -759,15 +868,35 @@ class DailyTradingSystem:
                     'processing_time': time.time() - start_time
                 }
             
-            # Update fundamental data for earnings announcement companies
+            # Limit processing to prevent blocking Priority 6
+            max_tickers_to_process = min(self.processing_limits['priority_2_max_tickers'], len(earnings_tickers))
+            tickers_to_process = earnings_tickers[:max_tickers_to_process]
+            
+            if len(earnings_tickers) > max_tickers_to_process:
+                logger.info(f"Limiting processing to {max_tickers_to_process} tickers to ensure Priority 6 runs")
+                logger.info(f"Remaining {len(earnings_tickers) - max_tickers_to_process} tickers will be processed in future runs")
+            
+            # Update fundamental data for earnings announcement companies with timeout
             successful_updates = 0
             failed_updates = 0
             api_calls_used = 0
+            max_processing_time = self.priority_timeouts['priority_2_earnings']
             
-            for ticker in earnings_tickers:
+            logger.info(f"Processing {len(tickers_to_process)} tickers (max time: {max_processing_time}s)")
+            
+            for i, ticker in enumerate(tickers_to_process):
+                # Check time constraint
+                elapsed_time = time.time() - start_time
+                if elapsed_time > max_processing_time:
+                    logger.info(f"Time limit reached ({elapsed_time:.1f}s > {max_processing_time}s) - stopping Priority 2 to allow Priority 6 to run")
+                    logger.info(f"Progress: {successful_updates + failed_updates}/{len(tickers_to_process)} tickers processed")
+                    break
+                
                 if self.api_calls_used >= self.max_api_calls_per_day:
                     logger.warning(f"API call limit reached after processing {successful_updates} earnings tickers")
                     break
+                
+                logger.info(f"Processing ticker {i+1}/{len(tickers_to_process)}: {ticker} - Elapsed: {elapsed_time:.1f}s")
                 
                 try:
                     # Update fundamental data
@@ -793,13 +922,18 @@ class DailyTradingSystem:
             result = {
                 'phase': 'priority_2_earnings_fundamentals',
                 'earnings_announcements_found': len(earnings_tickers),
+                'tickers_processed': len(tickers_to_process),
                 'successful_updates': successful_updates,
                 'failed_updates': failed_updates,
                 'api_calls_used': api_calls_used,
-                'processing_time': processing_time
+                'processing_time': processing_time,
+                'time_limit_reached': processing_time >= max_processing_time
             }
             
-            logger.info(f"PRIORITY 2: Earnings fundamentals completed - {successful_updates}/{len(earnings_tickers)} successful")
+            if processing_time >= max_processing_time:
+                logger.info(f"PRIORITY 2: Time limit reached - {successful_updates} tickers updated, continuing to Priority 6")
+            else:
+                logger.info(f"PRIORITY 2: Earnings fundamentals completed - {successful_updates}/{len(tickers_to_process)} successful")
             
             return result
             
@@ -819,6 +953,7 @@ class DailyTradingSystem:
         """
         PRIORITY 3: Update historical prices until at least 100 days of data for every company.
         Uses remaining API calls after priorities 1 and 2 with optimized batch processing.
+        Limited to prevent blocking Priority 6 (analyst data collection).
         """
         logger.info("📚 PRIORITY 3: Ensuring minimum 100 days of historical data")
         
@@ -842,22 +977,40 @@ class DailyTradingSystem:
             tickers_needing_history = self._get_tickers_needing_100_days_history()
             logger.info(f"Found {len(tickers_needing_history)} tickers needing historical data")
             
+            # Limit processing to prevent blocking Priority 6
+            max_tickers_to_process = min(self.processing_limits['priority_3_max_tickers'], len(tickers_needing_history))
+            tickers_to_process = tickers_needing_history[:max_tickers_to_process]
+            
+            if len(tickers_needing_history) > max_tickers_to_process:
+                logger.info(f"Limiting processing to {max_tickers_to_process} tickers to ensure Priority 6 runs")
+                logger.info(f"Remaining {len(tickers_needing_history) - max_tickers_to_process} tickers will be processed in future runs")
+            
             # Optimize processing based on available API calls
             successful_updates = 0
             failed_updates = 0
             api_calls_used = 0
+            max_processing_time = self.priority_timeouts['priority_3_historical']
             
             # Process tickers in batches to optimize API usage
             batch_size = min(50, remaining_calls)  # Process up to 50 tickers at once
-            ticker_batches = [tickers_needing_history[i:i + batch_size] 
-                            for i in range(0, len(tickers_needing_history), batch_size)]
+            ticker_batches = [tickers_to_process[i:i + batch_size] 
+                            for i in range(0, len(tickers_to_process), batch_size)]
+            
+            logger.info(f"Processing {len(tickers_to_process)} tickers in {len(ticker_batches)} batches (max time: {max_processing_time}s)")
             
             for batch_num, ticker_batch in enumerate(ticker_batches):
+                # Check time constraint
+                elapsed_time = time.time() - start_time
+                if elapsed_time > max_processing_time:
+                    logger.info(f"Time limit reached ({elapsed_time:.1f}s > {max_processing_time}s) - stopping Priority 3 to allow Priority 6 to run")
+                    logger.info(f"Progress: {successful_updates + failed_updates}/{len(tickers_to_process)} tickers processed")
+                    break
+                
                 if api_calls_used >= remaining_calls:
                     logger.info(f"API call limit reached after {api_calls_used} calls")
                     break
                 
-                logger.info(f"Processing historical data batch {batch_num + 1}/{len(ticker_batches)} ({len(ticker_batch)} tickers)")
+                logger.info(f"Processing historical data batch {batch_num + 1}/{len(ticker_batches)} ({len(ticker_batch)} tickers) - Elapsed: {elapsed_time:.1f}s")
                 
                 for ticker in ticker_batch:
                     if api_calls_used >= remaining_calls:
@@ -889,14 +1042,19 @@ class DailyTradingSystem:
             result = {
                 'phase': 'priority_3_historical_data',
                 'tickers_needing_history': len(tickers_needing_history),
+                'tickers_processed': len(tickers_to_process),
                 'successful_updates': successful_updates,
                 'failed_updates': failed_updates,
                 'api_calls_used': api_calls_used,
                 'processing_time': processing_time,
-                'batches_processed': len(ticker_batches)
+                'batches_processed': len(ticker_batches),
+                'time_limit_reached': processing_time >= max_processing_time
             }
             
-            logger.info(f"PRIORITY 3: Historical data completed - {successful_updates} tickers updated")
+            if processing_time >= max_processing_time:
+                logger.info(f"PRIORITY 3: Time limit reached - {successful_updates} tickers updated, continuing to Priority 6")
+            else:
+                logger.info(f"PRIORITY 3: Historical data completed - {successful_updates} tickers updated")
             
             return result
             
@@ -916,6 +1074,7 @@ class DailyTradingSystem:
         """
         PRIORITY 4: Fill missing fundamental data for companies.
         Uses any remaining API calls after priorities 1, 2, and 3.
+        Limited to prevent blocking Priority 6 (analyst data collection).
         """
         logger.info("PRIORITY 4: Filling missing fundamental data")
         
@@ -939,15 +1098,35 @@ class DailyTradingSystem:
             tickers_missing_fundamentals = self._get_tickers_missing_fundamental_data()
             logger.info(f"Found {len(tickers_missing_fundamentals)} tickers with missing fundamental data")
             
-            # Process missing fundamentals within API limit
+            # Limit processing to prevent blocking Priority 6
+            max_tickers_to_process = min(self.processing_limits['priority_4_max_tickers'], len(tickers_missing_fundamentals))
+            tickers_to_process = tickers_missing_fundamentals[:max_tickers_to_process]
+            
+            if len(tickers_missing_fundamentals) > max_tickers_to_process:
+                logger.info(f"Limiting processing to {max_tickers_to_process} tickers to ensure Priority 6 runs")
+                logger.info(f"Remaining {len(tickers_missing_fundamentals) - max_tickers_to_process} tickers will be processed in future runs")
+            
+            # Process missing fundamentals within API limit and time constraint
             successful_updates = 0
             failed_updates = 0
             api_calls_used = 0
+            max_processing_time = self.priority_timeouts['priority_4_fundamentals']
             
-            for ticker in tickers_missing_fundamentals:
+            logger.info(f"Processing {len(tickers_to_process)} tickers (max time: {max_processing_time}s)")
+            
+            for i, ticker in enumerate(tickers_to_process):
+                # Check time constraint
+                elapsed_time = time.time() - start_time
+                if elapsed_time > max_processing_time:
+                    logger.info(f"Time limit reached ({elapsed_time:.1f}s > {max_processing_time}s) - stopping Priority 4 to allow Priority 6 to run")
+                    logger.info(f"Progress: {successful_updates + failed_updates}/{len(tickers_to_process)} tickers processed")
+                    break
+                
                 if api_calls_used >= remaining_calls:
                     logger.info(f"API call limit reached after {api_calls_used} calls")
                     break
+                
+                logger.info(f"Processing ticker {i+1}/{len(tickers_to_process)}: {ticker} - Elapsed: {elapsed_time:.1f}s")
                 
                 try:
                     # Fill missing fundamental data
@@ -973,13 +1152,18 @@ class DailyTradingSystem:
             result = {
                 'phase': 'priority_4_missing_fundamentals',
                 'tickers_missing_data': len(tickers_missing_fundamentals),
+                'tickers_processed': len(tickers_to_process),
                 'successful_updates': successful_updates,
                 'failed_updates': failed_updates,
                 'api_calls_used': api_calls_used,
-                'processing_time': processing_time
+                'processing_time': processing_time,
+                'time_limit_reached': processing_time >= max_processing_time
             }
             
-            logger.info(f"PRIORITY 4: Missing fundamentals completed - {successful_updates} tickers updated")
+            if processing_time >= max_processing_time:
+                logger.info(f"PRIORITY 4: Time limit reached - {successful_updates} tickers updated, continuing to Priority 6")
+            else:
+                logger.info(f"PRIORITY 4: Missing fundamentals completed - {successful_updates} tickers updated")
             
             return result
             
@@ -1072,10 +1256,74 @@ class DailyTradingSystem:
 
     def _cleanup_delisted_stocks(self) -> Dict:
         """
-        Clean up delisted stocks that are causing API errors.
+        Clean up delisted stocks using multi-API validation.
+        Only removes stocks when at least 2 APIs explicitly confirm they don't exist.
         This helps reduce wasted API calls on non-existent stocks.
         """
-        logger.info("🧹 Cleaning up delisted stocks")
+        logger.info("🧹 Cleaning up delisted stocks with multi-API validation")
+        
+        try:
+            start_time = time.time()
+            
+            # Import the stock existence checker
+            try:
+                from .stock_existence_checker import StockExistenceChecker
+                logger.info("✅ Stock Existence Checker imported successfully")
+            except ImportError as e:
+                logger.error(f"❌ Failed to import Stock Existence Checker: {e}")
+                # Fallback to basic cleanup if import fails
+                return self._basic_delisted_cleanup()
+            
+            # Get all tickers
+            all_tickers = self.db.get_tickers()
+            logger.info(f"Checking {len(all_tickers)} tickers for delisted status")
+            
+            if not all_tickers:
+                logger.info("No tickers to check")
+                return {
+                    'phase': 'cleanup_delisted_stocks',
+                    'total_tickers_checked': 0,
+                    'delisted_removed': 0,
+                    'processing_time': time.time() - start_time
+                }
+            
+            # Initialize the existence checker
+            existence_checker = StockExistenceChecker(self.db, self.service_manager)
+            
+            # Process tickers in batches
+            check_results = existence_checker.process_tickers_in_batches(all_tickers)
+            
+            # Remove delisted stocks
+            removal_results = existence_checker.remove_delisted_stocks(check_results)
+            
+            processing_time = time.time() - start_time
+            
+            result = {
+                'phase': 'cleanup_delisted_stocks',
+                'total_tickers_checked': len(all_tickers),
+                'delisted_removed': removal_results['removed'],
+                'removal_errors': removal_results['errors'],
+                'processing_time': processing_time,
+                'apis_checked': existence_checker.apis_to_check,
+                'method': 'multi_api_validation'
+            }
+            
+            logger.info(f"Delisted stocks cleanup completed: {removal_results['removed']} removed, {removal_results['errors']} errors")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error in multi-API delisted stocks cleanup: {e}")
+            # Fallback to basic cleanup if multi-API method fails
+            logger.warning("Falling back to basic delisted stock cleanup")
+            return self._basic_delisted_cleanup()
+    
+    def _basic_delisted_cleanup(self) -> Dict:
+        """
+        Basic cleanup method for delisted stocks (fallback).
+        Uses hardcoded list of known delisted stocks.
+        """
+        logger.info("🧹 Basic cleanup of known delisted stocks")
         
         try:
             start_time = time.time()
@@ -1111,22 +1359,24 @@ class DailyTradingSystem:
             
             result = {
                 'phase': 'cleanup_delisted_stocks',
+                'method': 'basic_fallback',
                 'candidates_checked': len(delisted_candidates),
                 'removed_count': removed_count,
                 'processing_time': time.time() - start_time
             }
             
-            logger.info(f"Cleanup completed - {removed_count} delisted stocks removed")
+            logger.info(f"Basic cleanup completed - {removed_count} delisted stocks removed")
             
             return result
             
         except Exception as e:
-            logger.error(f"Error in delisted stocks cleanup: {e}")
+            logger.error(f"Error in basic delisted stocks cleanup: {e}")
             self.error_handler.handle_error(
-                "Delisted stocks cleanup failed", e, ErrorSeverity.MEDIUM
+                "Basic delisted stocks cleanup failed", e, ErrorSeverity.MEDIUM
             )
             return {
                 'phase': 'cleanup_delisted_stocks',
+                'method': 'basic_fallback',
                 'error': str(e),
                 'removed_count': 0
             }

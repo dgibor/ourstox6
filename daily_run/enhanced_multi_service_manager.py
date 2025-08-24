@@ -112,13 +112,13 @@ class EnhancedMultiServiceManager:
             ),
             'finnhub': ServiceConfig(
                 name='Finnhub',
-                priority=ServicePriority.EMERGENCY,
+                priority=ServicePriority.PRIMARY,  # Changed from EMERGENCY to PRIMARY
                 rate_limit_per_minute=60,
                 rate_limit_per_day=None,
                 cost_per_call=0.0,
-                reliability_score=0.80,
+                reliability_score=0.95,  # Increased from 0.80 to 0.95
                 capabilities=['pricing', 'fundamentals', 'news'],
-                enabled=bool(os.getenv('FINNHUB_API_KEY'))
+                enabled=bool(os.getenv('FINNHUB_API_KEY_1') or os.getenv('FINNHUB_API_KEY_2') or os.getenv('FINNHUB_API_KEY_3') or os.getenv('FINNHUB_API_KEY_4'))
             ),
             'polygon': ServiceConfig(
                 name='Polygon.io',

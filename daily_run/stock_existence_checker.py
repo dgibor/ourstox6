@@ -47,8 +47,8 @@ class StockExistenceChecker:
         self.service_manager = service_manager or EnhancedMultiServiceManager()
         self.error_handler = ErrorHandler("stock_existence_checker")
         
-        # APIs to check in order of reliability
-        self.apis_to_check = ['yahoo', 'fmp', 'finnhub', 'alpha_vantage']
+        # APIs to check in order of reliability - Finnhub first as it's the best API
+        self.apis_to_check = ['finnhub', 'yahoo', 'fmp', 'alpha_vantage']
         
         # Batch processing configuration
         self.batch_size = 50
