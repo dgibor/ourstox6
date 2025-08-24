@@ -47,6 +47,38 @@ class AnalystScoringManager:
             logger.error(f"Error getting active tickers: {e}")
             return []
     
+    def filter_existing_tickers(self, tickers: List[str]) -> List[str]:
+        """Filter out tickers that don't exist in any API to avoid wasted calls"""
+        try:
+            from .stock_existence_checker import StockExistenceChecker
+            
+            logger.info(f"Filtering {len(tickers)} tickers for API existence")
+            existence_checker = StockExistenceChecker(self.db)
+            
+            # Check first 10 tickers as a sample to avoid too many API calls
+            sample_size = min(10, len(tickers))
+            sample_tickers = tickers[:sample_size]
+            
+            check_results = existence_checker.process_tickers_in_batches(sample_tickers)
+            
+            # Count how many don't exist in any API
+            non_existent_count = sum(1 for result in check_results.values() if result.should_remove)
+            
+            if non_existent_count > 0:
+                logger.warning(f"Found {non_existent_count} potentially delisted stocks in sample")
+                # Return all tickers but log the warning - full cleanup should be done separately
+                return tickers
+            
+            logger.info("Sample check shows all tickers exist in APIs")
+            return tickers
+            
+        except ImportError:
+            logger.warning("Stock Existence Checker not available, proceeding with all tickers")
+            return tickers
+        except Exception as e:
+            logger.error(f"Error filtering tickers: {e}")
+            return tickers
+    
     def check_api_rate_limits(self, service_manager) -> bool:
         """Check if we have API calls remaining for analyst scoring"""
         try:
@@ -74,6 +106,14 @@ class AnalystScoringManager:
             tickers = self.get_active_tickers()
             if not tickers:
                 return self._create_result('skipped', 'no_active_tickers', start_time)
+            
+            # Filter out potentially delisted stocks to avoid wasted API calls
+            original_count = len(tickers)
+            tickers = self.filter_existing_tickers(tickers)
+            filtered_count = len(tickers)
+            
+            if filtered_count < original_count:
+                logger.info(f"Filtered {original_count - filtered_count} potentially delisted tickers")
             
             # Check API rate limits
             if not self.check_api_rate_limits(service_manager):

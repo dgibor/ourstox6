@@ -17,13 +17,7 @@ PYTHONUNBUFFERED = "1"
 TZ = "America/New_York"
 WORKDIR = "/app"
 
-# Original cron jobs (commented out for testing)
-# Primary cron job - 10:05 PM UTC (5:05 PM ET after market close)
-# [[cron]]
-# schedule = "5 22 * * *"
-# command = "python run_daily_cron.py"
-
-# Backup cron job - 11:05 PM UTC (6:05 PM ET) in case primary fails
-# [[cron]]
-# schedule = "5 23 * * *"
-# command = "python run_daily_cron.py --backup" 
+# Primary cron job using Railway's built-in cron
+[[cron]]
+schedule = "5 22 * * *"
+command = "python railway_cron_entry.py" 

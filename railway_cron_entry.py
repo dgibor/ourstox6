@@ -4,6 +4,7 @@ Railway Cron Entry Point for Daily Trading System
 
 This script is specifically designed for Railway deployments.
 It handles path issues and provides better error reporting.
+Enhanced version with better Railway compatibility.
 """
 
 import os
@@ -28,6 +29,12 @@ def setup_paths():
     cwd = os.getcwd()
     logger.info(f"📁 Current working directory: {cwd}")
     
+    # List all environment variables for debugging
+    logger.info("🔍 Environment variables:")
+    for key, value in os.environ.items():
+        if key in ['PYTHONPATH', 'WORKDIR', 'PWD', 'HOME']:
+            logger.info(f"  {key}: {value}")
+    
     # Check if we're in the expected Railway directory
     expected_dirs = ['/app', '/workspace', cwd]
     for expected_dir in expected_dirs:
@@ -42,6 +49,12 @@ def setup_paths():
     if os.path.exists(daily_run_dir) and daily_run_dir not in sys.path:
         sys.path.insert(0, daily_run_dir)
         logger.info(f"✅ Added {daily_run_dir} to Python path")
+    
+    # Add utility_functions directory to path
+    utility_dir = os.path.join(cwd, 'utility_functions')
+    if os.path.exists(utility_dir) and utility_dir not in sys.path:
+        sys.path.insert(0, utility_dir)
+        logger.info(f"✅ Added {utility_dir} to Python path")
     
     # List all files in current directory
     logger.info("📋 All files in current directory:")
@@ -79,20 +92,41 @@ def main():
         # Try to import the daily trading system
         logger.info("📦 Attempting to import DailyTradingSystem...")
         
-        try:
-            from daily_run.daily_trading_system import DailyTradingSystem
-            logger.info("✅ DailyTradingSystem imported successfully")
-        except ImportError as e:
-            logger.error(f"❌ Failed to import DailyTradingSystem: {e}")
-            logger.error("🔍 Trying alternative import paths...")
-            
-            # Try direct import
+        DailyTradingSystem = None
+        
+        # Try multiple import strategies
+        import_strategies = [
+            ("daily_run.daily_trading_system", "DailyTradingSystem"),
+            ("daily_trading_system", "DailyTradingSystem"),
+            ("daily_run.daily_trading_system", "DailyTradingSystem")
+        ]
+        
+        for module_path, class_name in import_strategies:
             try:
-                from daily_trading_system import DailyTradingSystem
-                logger.info("✅ DailyTradingSystem imported via direct import")
-            except ImportError as e2:
-                logger.error(f"❌ Direct import also failed: {e2}")
-                raise
+                if "." in module_path:
+                    # Handle module.submodule imports
+                    module_parts = module_path.split(".")
+                    module = __import__(module_parts[0])
+                    for part in module_parts[1:]:
+                        module = getattr(module, part)
+                    DailyTradingSystem = getattr(module, class_name)
+                else:
+                    # Handle direct imports
+                    module = __import__(module_path)
+                    DailyTradingSystem = getattr(module, class_name)
+                
+                logger.info(f"✅ DailyTradingSystem imported successfully from {module_path}")
+                break
+                
+            except ImportError as e:
+                logger.warning(f"⚠️ Failed to import from {module_path}: {e}")
+                continue
+            except AttributeError as e:
+                logger.warning(f"⚠️ Failed to get {class_name} from {module_path}: {e}")
+                continue
+        
+        if DailyTradingSystem is None:
+            raise ImportError("Could not import DailyTradingSystem from any available source")
         
         # Initialize and run
         logger.info("🔧 Initializing DailyTradingSystem...")

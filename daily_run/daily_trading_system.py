@@ -2005,33 +2005,61 @@ class DailyTradingSystem:
 
     def _remove_delisted_stocks(self) -> Dict:
         """
-        Remove delisted stocks from the database.
+        Remove delisted stocks from the database using multi-API validation.
+        Checks if stocks exist across all available APIs and removes those that don't.
         """
-        logger.info("🗑️ Removing delisted stocks")
+        logger.info("🗑️ Removing delisted stocks with multi-API validation")
         
         try:
             start_time = time.time()
             
+            # Import the stock existence checker
+            try:
+                from .stock_existence_checker import StockExistenceChecker
+                logger.info("✅ Stock Existence Checker imported successfully")
+            except ImportError as e:
+                logger.error(f"❌ Failed to import Stock Existence Checker: {e}")
+                return {
+                    'phase': 'delisted_removal',
+                    'error': f"Import failed: {e}",
+                    'delisted_removed': 0,
+                    'processing_time': time.time() - start_time
+                }
+            
             # Get all tickers
             all_tickers = self.db.get_tickers()
+            logger.info(f"Checking {len(all_tickers)} tickers for delisted status")
             
-            # Check for delisted stocks (simplified check)
-            delisted_count = 0
-            checked_count = 0
+            if not all_tickers:
+                logger.info("No tickers to check")
+                return {
+                    'phase': 'delisted_removal',
+                    'total_tickers_checked': 0,
+                    'delisted_removed': 0,
+                    'processing_time': time.time() - start_time
+                }
             
-            # For now, just return a placeholder result
-            # In production, this would check each ticker's status
+            # Initialize the existence checker
+            existence_checker = StockExistenceChecker(self.db, self.service_manager)
+            
+            # Process tickers in batches
+            check_results = existence_checker.process_tickers_in_batches(all_tickers)
+            
+            # Remove delisted stocks
+            removal_results = existence_checker.remove_delisted_stocks(check_results)
             
             processing_time = time.time() - start_time
             
             result = {
                 'phase': 'delisted_removal',
-                'total_tickers_checked': checked_count,
-                'delisted_removed': delisted_count,
-                'processing_time': processing_time
+                'total_tickers_checked': len(all_tickers),
+                'delisted_removed': removal_results['removed'],
+                'removal_errors': removal_results['errors'],
+                'processing_time': processing_time,
+                'apis_checked': existence_checker.apis_to_check
             }
             
-            logger.info(f"Delisted stocks check completed: {delisted_count} removed")
+            logger.info(f"Delisted stocks check completed: {removal_results['removed']} removed, {removal_results['errors']} errors")
             
             return result
             
@@ -2043,7 +2071,8 @@ class DailyTradingSystem:
             return {
                 'phase': 'delisted_removal',
                 'error': str(e),
-                'delisted_removed': 0
+                'delisted_removed': 0,
+                'processing_time': time.time() - start_time
             }
 
     def _get_active_tickers(self) -> List[str]:
